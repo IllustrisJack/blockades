@@ -107,11 +107,26 @@
 						              and $Defender.mayattack.{$Attacker}
 						              and ($Defender.relationto.{$Attacker} le -0.25)
 						              and not $BBVT.$ActiveBlockades.{$LocGate}?">
-							<signal_cue_instantly cue="EventDispatchBlockade" param="table[
-								$DefenderFaction = $Defender,
-								$AttackerFaction = $Attacker,
-								$Gate = $LocGate
-							]"/>
+
+							<!-- Skip if anyone (player or other faction) is already blockading
+							     this gate. Cheap heuristic: any ship in the gate's sector within
+							     25km whose current order is 'Blockade'. -->
+							<find_ship name="$BBLocSectorShips" space="$LocGate.sector" multiple="true"/>
+							<set_value name="$BBLocOccupied" exact="false"/>
+							<do_for_each name="$BBLocShip" in="$BBLocSectorShips">
+								<do_if value="@$BBLocShip.order? and ($BBLocShip.order.id == 'Blockade') and ($BBLocShip.distanceto.{$LocGate} lt 25km)">
+									<set_value name="$BBLocOccupied" exact="true"/>
+									<break/>
+								</do_if>
+							</do_for_each>
+
+							<do_if value="not $BBLocOccupied">
+								<signal_cue_instantly cue="EventDispatchBlockade" param="table[
+									$DefenderFaction = $Defender,
+									$AttackerFaction = $Attacker,
+									$Gate = $LocGate
+								]"/>
+							</do_if>
 						</do_if>
 					</do_if>
 				</do_for_each>

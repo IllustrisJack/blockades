@@ -15,6 +15,8 @@
 		<t id="115">Side (0=auto / -1 / +1)</t>
 		<t id="116">Formation Size</t>
 		<t id="117">Slot Index</t>
+		<t id="118">Face Away From Gate</t>
+		<t id="119">This gate is already blockaded by another faction.</t>
 
 		<!-- Menus -->
 		<t id="200">Set Up Blockade</t>

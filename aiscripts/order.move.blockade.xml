@@ -18,6 +18,7 @@
       <param name="pursuetargets" default="false" type="bool" text="{20810, 113}" advanced="true" comment="Pursue hostiles beyond the blockade ring."/>
       <param name="attackonsight" default="true" type="bool" text="{20810, 114}" advanced="true" comment="Attack hostiles on sight (vs. only when attacked)."/>
       <param name="hostileside" default="0" type="internal" comment="Which side of the gate: 0=auto, 1=destination-facing, -1=interior-facing."/>
+      <param name="lookaway" default="false" type="bool" text="{20810, 118}" advanced="true" comment="Face away from the gate (sector-side blockade) instead of toward it."/>
       <param name="formationsize" default="0" type="internal" comment="Total ships in formation. 0 = auto-detect from fleet."/>
       <param name="slotindex" default="-1" type="internal" comment="This ship's slot in the formation. -1 = auto-detect."/>
       <param name="slotpos" default="null" type="internal" comment="Computed slot position in $targetsector. Set in init; exposed via &lt;location&gt; so the map can render the per-ship destination."/>
@@ -70,6 +71,25 @@
     <do_if value="not $target or not $target.exists or not $target.isclass.gate">
       <debug_text text="'Blockade: invalid target. Aborting.'" filter="error"/>
       <set_value name="$abort"/>
+    </do_if>
+
+    <!-- "Already blockaded" check. If any ship of a DIFFERENT faction within
+         25km of the gate is already running Blockade, fail the order with a
+         localized message. Same-faction overlap is allowed (reinforcement). -->
+    <do_if value="not $abort?">
+      <find_ship name="$LocSectorShips" space="$target.sector" multiple="true"/>
+      <do_for_each name="$LocOtherShip" in="$LocSectorShips">
+        <do_if value="not $abort?
+                      and ($LocOtherShip != this.assignedcontrolled)
+                      and ($LocOtherShip.owner != this.assignedcontrolled.owner)
+                      and @$LocOtherShip.order?
+                      and ($LocOtherShip.order.id == 'Blockade')
+                      and ($LocOtherShip.distanceto.{$target} lt 25km)">
+          <debug_text text="'Blockade: %s already blockaded by %s; aborting.'.[$target.knownname, $LocOtherShip.owner.name]" chance="$debugchance"/>
+          <set_order_failed order="this.assignedcontrolled.order" text="{20810, 119}"/>
+          <set_value name="$abort"/>
+        </do_if>
+      </do_for_each>
     </do_if>
 
     <!-- Resolve sector. Gates live in a zone inside a sector. -->
@@ -127,6 +147,7 @@
               <param name="pursuetargets" value="$pursuetargets"/>
               <param name="attackonsight" value="$attackonsight"/>
               <param name="hostileside" value="$hostileside"/>
+              <param name="lookaway" value="$lookaway"/>
               <param name="formationsize" value="$resolvedsize"/>
               <param name="slotindex" value="$dispidx"/>
               <param name="debugchance" value="$debugchance"/>
@@ -257,12 +278,22 @@
           <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
           <do_if value="$slotdist gt (this.ship.size + 1500m)">
             <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-            <create_orientation name="$facegate" refposition="this.ship.position">
-              <position object="$target"/>
-            </create_orientation>
+            <!-- Facing: look at gate (default) or look away. For "look away" we
+                 build the orientation from gate→ship instead of ship→gate, which
+                 points the ship's forward axis directly away from the gate. -->
+            <do_if value="$lookaway">
+              <create_orientation name="$blockadeface" refposition="$target.position">
+                <position value="this.ship.position"/>
+              </create_orientation>
+            </do_if>
+            <do_else>
+              <create_orientation name="$blockadeface" refposition="this.ship.position">
+                <position object="$target"/>
+              </create_orientation>
+            </do_else>
             <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" finishonapproach="true" forcerotation="true">
               <position value="$slotpos"/>
-              <rotation value="$facegate"/>
+              <rotation value="$blockadeface"/>
             </move_to>
           </do_if>
           <set_command_action commandaction="commandaction.standingby"/>
