@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<diff>
+	<add sel="/icons">
+		<icon name="order_blockade" texture="assets\textures\ui\order\order_protectposition.tga" height="32" width="32"/>
+	</add>
+</diff>

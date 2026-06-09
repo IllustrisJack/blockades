@@ -281,8 +281,10 @@
 							<debug_text text="'BB: disbanding blockade at %s.'.[@$Gate.knownname]" filter="general"/>
 						</do_if>
 						<do_for_each name="$LocShip" in="$Alive">
-							<do_if value="@$LocShip.order? and (@$LocShip.order.id == 'Blockade')">
-								<cancel_order order="$LocShip.order"/>
+							<do_if value="$LocShip.order?">
+								<do_if value="$LocShip.order.id == 'Blockade'">
+									<cancel_order order="$LocShip.order"/>
+								</do_if>
 							</do_if>
 						</do_for_each>
 						<remove_value name="$BBVT.$ActiveBlockades.{$LocKey}"/>
