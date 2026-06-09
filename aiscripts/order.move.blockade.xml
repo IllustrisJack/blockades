@@ -75,20 +75,33 @@
     </do_if>
 
     <!-- "Already blockaded" check. If any ship of a DIFFERENT faction within
-         25km of the gate is already running Blockade, fail the order with a
-         localized message. Same-faction overlap is allowed (reinforcement). -->
+         25km of the gate is already running Blockade, abort the order.
+         Nested do_if for each conjunct because X4's expression evaluator does
+         NOT short-circuit AND chains — every conjunct's property access is
+         evaluated regardless of earlier conjunct results. -->
     <do_if value="not $abort?">
       <find_ship name="$LocSectorShips" space="$target.sector" multiple="true"/>
       <do_for_each name="$LocOtherShip" in="$LocSectorShips">
-        <do_if value="not $abort?
-                      and ($LocOtherShip != this.assignedcontrolled)
-                      and ($LocOtherShip.owner != this.assignedcontrolled.owner)
-                      and $LocOtherShip.order?
-                      and ($LocOtherShip.order.id == 'Blockade')
-                      and ($LocOtherShip.distanceto.{$target} lt 25km)">
-          <debug_text text="'Blockade: %s already blockaded by %s; aborting.'.[$target.knownname, $LocOtherShip.owner.name]" chance="$debugchance"/>
-          <set_order_failed order="this.assignedcontrolled.order" text="{20810, 119}"/>
-          <set_value name="$abort"/>
+        <do_if value="not $abort?">
+          <do_if value="$LocOtherShip != this.assignedcontrolled">
+            <do_if value="$LocOtherShip.owner != this.assignedcontrolled.owner">
+              <do_if value="$LocOtherShip.order?">
+                <do_if value="$LocOtherShip.order.id == 'Blockade'">
+                  <do_if value="$LocOtherShip.distanceto.{$target} lt 25km">
+                    <debug_text text="'Blockade: %s already blockaded by %s; aborting.'.[$target.knownname, $LocOtherShip.owner.name]" chance="$debugchance"/>
+                    <!-- set_order_failed requires this.assignedcontrolled.order
+                         to be the current order, which it isn't yet during init
+                         for dispatched subs — would error 'null is not of type
+                         order'. Guard it. -->
+                    <do_if value="this.assignedcontrolled.order?">
+                      <set_order_failed order="this.assignedcontrolled.order" text="{20810, 119}"/>
+                    </do_if>
+                    <set_value name="$abort"/>
+                  </do_if>
+                </do_if>
+              </do_if>
+            </do_if>
+          </do_if>
         </do_if>
       </do_for_each>
     </do_if>
