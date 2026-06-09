@@ -74,9 +74,6 @@
 				<do_if value="(not $BBVT.$ActiveBlockades?) or ($BBVT.$ActiveBlockades == null)">
 					<set_value name="$BBVT.$ActiveBlockades" exact="table[]"/>
 				</do_if>
-				<do_if value="(not $BBVT.$GateSlots?) or ($BBVT.$GateSlots == null)">
-					<set_value name="$BBVT.$GateSlots" exact="table[]"/>
-				</do_if>
 				<do_if value="not $BBVT.$ExcludedFactions?">
 					<set_value name="$BBVT.$ExcludedFactions" exact="[faction.xenon, faction.khaak, faction.yaki, faction.scaleplate, faction.player, faction.civilian, faction.criminal, faction.smuggler, faction.visitor]"/>
 				</do_if>
@@ -137,11 +134,7 @@
 						<set_value name="$Sector" exact="$Gate.sector"/>
 						<set_value name="$Ships" exact="[]"/>
 						<set_value name="$TotalShips" exact="$BBVT.$MinFleetCapital + $BBVT.$MinFleetEscort + $BBVT.$MinFleetFighter"/>
-
-						<!-- Ensure the per-gate occupancy bucket exists; spawned ships claim slots from it. -->
-						<do_if value="not $BBVT.$GateSlots.{$Gate}?">
-							<set_value name="$BBVT.$GateSlots.{$Gate}" exact="table[]"/>
-						</do_if>
+						<set_value name="$SpawnIdx" exact="0"/>
 
 						<!-- Pick race-appropriate macros up front. -->
 						<set_value name="$Race" exact="$Defender.primaryrace"/>
@@ -226,7 +219,7 @@
 			</actions>
 		</cue>
 
-		<library name="LibrarySpawnOne" purpose="run_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Claims the next free slot in md.$BBVarTable.$GateSlots.{$Gate} and dispatches Blockade with that slot, so two factions blockading the same gate don't fight over positions.">
+		<library name="LibrarySpawnOne" purpose="run_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Appends to $Ships and dispatches Blockade with the next sequential slot in $SpawnIdx.">
 			<actions>
 				<do_if value="$CurrentMacro != null">
 					<create_ship name="$LocShip" macro="$CurrentMacro" sector="$BBLocShipyard.sector">
@@ -235,22 +228,16 @@
 					</create_ship>
 					<do_if value="$LocShip">
 						<append_to_list name="$Ships" exact="$LocShip"/>
-
-						<set_value name="$LocClaimSlot" exact="0"/>
-						<do_while value="$BBVT.$GateSlots.{$Gate}.{$LocClaimSlot}?">
-							<set_value name="$LocClaimSlot" operation="add" exact="1"/>
-						</do_while>
-						<set_value name="$BBVT.$GateSlots.{$Gate}.{$LocClaimSlot}" exact="$LocShip"/>
-
 						<create_order id="'Blockade'" object="$LocShip" default="true">
 							<param name="target" value="$Gate"/>
 							<param name="distance" value="$BBVT.$BlockadeDistance"/>
 							<param name="formationsize" value="$TotalShips"/>
-							<param name="slotindex" value="$LocClaimSlot"/>
+							<param name="slotindex" value="$SpawnIdx"/>
 						</create_order>
 					</do_if>
 					<remove_value name="$LocShip"/>
 				</do_if>
+				<set_value name="$SpawnIdx" operation="add" exact="1"/>
 			</actions>
 		</library>
 
@@ -302,44 +289,6 @@
 						</do_for_each>
 						<remove_value name="$BBVT.$ActiveBlockades.{$LocKey}"/>
 					</do_if>
-				</do_for_each>
-
-				<!-- Stale-slot reaper. Walk $GateSlots and remove entries whose ship
-				     no longer exists, isn't operational, or is no longer running the
-				     Blockade order. Drops the whole gate bucket once empty. Covers
-				     interrupt paths that bypass the order's finish-label cleanup. -->
-				<do_for_each name="$LocGateKey" in="$BBVT.$GateSlots.keys.list">
-					<do_if value="not @$LocGateKey.exists">
-						<remove_value name="$BBVT.$GateSlots.{$LocGateKey}"/>
-					</do_if>
-					<do_else>
-						<set_value name="$LocSlots" exact="$BBVT.$GateSlots.{$LocGateKey}"/>
-						<do_for_each name="$LocSlotIdx" in="$LocSlots.keys.list">
-							<set_value name="$LocSlotShip" exact="$LocSlots.{$LocSlotIdx}"/>
-							<set_value name="$LocStale" exact="false"/>
-							<do_if value="not @$LocSlotShip.exists">
-								<set_value name="$LocStale" exact="true"/>
-							</do_if>
-							<do_elseif value="not $LocSlotShip.isoperational">
-								<set_value name="$LocStale" exact="true"/>
-							</do_elseif>
-							<do_elseif value="not $LocSlotShip.order?">
-								<set_value name="$LocStale" exact="true"/>
-							</do_elseif>
-							<do_elseif value="$LocSlotShip.order.id != 'Blockade'">
-								<set_value name="$LocStale" exact="true"/>
-							</do_elseif>
-							<do_if value="$LocStale">
-								<remove_value name="$LocSlots.{$LocSlotIdx}"/>
-								<do_if value="$BBVT.$DebugDetailed">
-									<debug_text text="'BB: reaped stale slot %s at gate %s.'.[$LocSlotIdx, @$LocGateKey.knownname]" filter="general"/>
-								</do_if>
-							</do_if>
-						</do_for_each>
-						<do_if value="$LocSlots.keys.count == 0">
-							<remove_value name="$BBVT.$GateSlots.{$LocGateKey}"/>
-						</do_if>
-					</do_else>
 				</do_for_each>
 			</actions>
 		</cue>
