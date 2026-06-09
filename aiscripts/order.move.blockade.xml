@@ -83,7 +83,7 @@
         <do_if value="not $abort?
                       and ($LocOtherShip != this.assignedcontrolled)
                       and ($LocOtherShip.owner != this.assignedcontrolled.owner)
-                      and @$LocOtherShip.order?
+                      and $LocOtherShip.order?
                       and ($LocOtherShip.order.id == 'Blockade')
                       and ($LocOtherShip.distanceto.{$target} lt 25km)">
           <debug_text text="'Blockade: %s already blockaded by %s; aborting.'.[$target.knownname, $LocOtherShip.owner.name]" chance="$debugchance"/>
@@ -143,8 +143,10 @@
           <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
             <!-- Re-apply: clear any prior Blockade on this sub so it picks up
                  fresh params (slot, facing, distance) instead of resuming stale state. -->
-            <do_if value="@$LocSub.order? and ($LocSub.order.id == 'Blockade')">
-              <cancel_order order="$LocSub.order"/>
+            <do_if value="$LocSub.order?">
+              <do_if value="$LocSub.order.id == 'Blockade'">
+                <cancel_order order="$LocSub.order"/>
+              </do_if>
             </do_if>
             <create_order id="'Blockade'" object="$LocSub" default="true">
               <param name="target" value="$target"/>
@@ -269,12 +271,17 @@
         </do_if>
 
         <!-- Commander watch: there is no event_object_changed_order in 9.0,
-             so we poll. Latency = wait interval below. -->
-        <do_if value="@this.assignedcontrolled.commander">
-          <do_if value="(not @this.assignedcontrolled.commander.order?) or (this.assignedcontrolled.commander.order.id != 'Blockade')">
-            <debug_text text="'Blockade: commander dropped order, sub aborting.'" chance="$debugchance"/>
+             so we poll. Latency = wait interval below. Two-step probe because
+             @X? is invalid in 9.0 — @ and ? can't combine. -->
+        <do_if value="this.assignedcontrolled.commander?">
+          <do_if value="not this.assignedcontrolled.commander.order?">
+            <debug_text text="'Blockade: commander has no order, sub aborting.'" chance="$debugchance"/>
             <resume label="finish"/>
           </do_if>
+          <do_elseif value="this.assignedcontrolled.commander.order.id != 'Blockade'">
+            <debug_text text="'Blockade: commander switched off Blockade, sub aborting.'" chance="$debugchance"/>
+            <resume label="finish"/>
+          </do_elseif>
         </do_if>
 
         <!-- Recompute facing each tick so the ship continuously tracks the gate.
@@ -337,8 +344,10 @@
   <on_abort>
     <do_if value="this.assignedcontrolled.subordinates.count gt 0">
       <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-        <do_if value="@$LocSub.order? and ($LocSub.order.id == 'Blockade')">
-          <cancel_order order="$LocSub.order"/>
+        <do_if value="$LocSub.order?">
+          <do_if value="$LocSub.order.id == 'Blockade'">
+            <cancel_order order="$LocSub.order"/>
+          </do_if>
         </do_if>
       </do_for_each>
     </do_if>

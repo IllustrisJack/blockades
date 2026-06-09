@@ -114,9 +114,11 @@
 							<find_ship name="$BBLocSectorShips" space="$LocGate.sector" multiple="true"/>
 							<set_value name="$BBLocOccupied" exact="false"/>
 							<do_for_each name="$BBLocShip" in="$BBLocSectorShips">
-								<do_if value="@$BBLocShip.order? and ($BBLocShip.order.id == 'Blockade') and ($BBLocShip.distanceto.{$LocGate} lt 25km)">
-									<set_value name="$BBLocOccupied" exact="true"/>
-									<break/>
+								<do_if value="$BBLocShip.order?">
+									<do_if value="($BBLocShip.order.id == 'Blockade') and ($BBLocShip.distanceto.{$LocGate} lt 25km)">
+										<set_value name="$BBLocOccupied" exact="true"/>
+										<break/>
+									</do_if>
 								</do_if>
 							</do_for_each>
 
