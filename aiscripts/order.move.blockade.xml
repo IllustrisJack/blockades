@@ -20,6 +20,7 @@
       <param name="hostileside" default="0" type="internal" comment="Which side of the gate: 0=auto, 1=destination-facing, -1=interior-facing."/>
       <param name="formationsize" default="0" type="internal" comment="Total ships in formation. 0 = auto-detect from fleet."/>
       <param name="slotindex" default="-1" type="internal" comment="This ship's slot in the formation. -1 = auto-detect."/>
+      <param name="slotpos" default="null" type="internal" comment="Computed slot position in $targetsector. Set in init; exposed via &lt;location&gt; so the map can render the per-ship destination."/>
       <param name="timeout" type="time" default="0s" infinitevalue="0s" text="{1041, 10034}" advanced="true" comment="Duration (0 = infinite).">
         <input_param name="max" value="1h"/>
         <input_param name="step" value="30s"/>
@@ -33,7 +34,11 @@
       <match shiptype="shiptype.lasertower" negate="true"/>
       <match class="class.spacesuit" negate="true"/>
     </requires>
-    <location object="$target"/>
+    <!-- Two-tier location: prefer the slot position (per-ship marker, drawn like
+         move.generic does); fall back to the gate itself if init hasn't computed
+         the slot yet (e.g. order is queued but hasn't run). -->
+    <location object="$targetsector" position="$slotpos" condition="$targetsector and $slotpos"/>
+    <location object="$target" condition="$target"/>
   </order>
   <interrupts>
     <handler ref="SectorChangeHandler"/>
@@ -92,48 +97,72 @@
       </do_else>
     </do_if>
 
-    <!-- Resolve formation size + slot. Three cases:
-         (a) explicit params from caller   → use as-is (MD-dispatched and leader-dispatched ships hit this path)
-         (b) this ship is a wing leader    → slot 0; iterate subordinates and assign Blockade to each with sequential slot index
-         (c) solo ship                     → (1, 0) -->
+    <!-- Resolve formation size + slot. Single shared per-gate occupancy table
+         in md.Blockade.$BBVarTable.$GateSlots keeps multi-faction blockades on
+         the same gate from stepping on each other's positions.
+         (a) explicit $slotindex from caller → trust it, write into table.
+         (b) this ship is a wing leader      → claim its own slot, then pre-claim
+                                               sub slots and dispatch each sub with
+                                               an explicit slotindex.
+         (c) solo                            → claim one slot. -->
     <do_if value="not $abort?">
       <set_value name="$resolvedsize" exact="$formationsize"/>
       <set_value name="$resolvedslot" exact="$slotindex"/>
 
-      <do_if value="$resolvedslot lt 0">
-        <do_if value="this.assignedcontrolled.subordinates.count gt 0">
-          <!-- Wing leader: take slot 0, dispatch sequential slots to subs. -->
-          <set_value name="$resolvedslot" exact="0"/>
-          <do_if value="$resolvedsize le 0">
-            <set_value name="$resolvedsize" exact="this.assignedcontrolled.subordinates.count + 1"/>
-          </do_if>
+      <!-- Ensure the global occupancy table exists. -->
+      <do_if value="not md.Blockade.$BBVarTable?">
+        <set_value name="md.$BBVarTable" exact="table[]"/>
+      </do_if>
+      <do_if value="not md.Blockade.$BBVarTable.$GateSlots?">
+        <set_value name="md.Blockade.$BBVarTable.$GateSlots" exact="table[]"/>
+      </do_if>
+      <do_if value="not md.Blockade.$BBVarTable.$GateSlots.{$target}?">
+        <set_value name="md.Blockade.$BBVarTable.$GateSlots.{$target}" exact="table[]"/>
+      </do_if>
+      <set_value name="$gateslots" exact="md.Blockade.$BBVarTable.$GateSlots.{$target}"/>
 
-          <set_value name="$dispatchidx" exact="1"/>
-          <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-            <create_order id="'Blockade'" object="$LocSub" default="true">
-              <param name="target" value="$target"/>
-              <param name="distance" value="$distance"/>
-              <param name="engagerange" value="$engagerange"/>
-              <param name="pursuetargets" value="$pursuetargets"/>
-              <param name="attackonsight" value="$attackonsight"/>
-              <param name="hostileside" value="$hostileside"/>
-              <param name="formationsize" value="$resolvedsize"/>
-              <param name="slotindex" value="$dispatchidx"/>
-              <param name="debugchance" value="$debugchance"/>
-            </create_order>
-            <set_value name="$dispatchidx" operation="add" exact="1"/>
-          </do_for_each>
+      <!-- Claim a slot if we don't have an explicit one. -->
+      <do_if value="$resolvedslot lt 0">
+        <set_value name="$tryslot" exact="0"/>
+        <do_while value="$gateslots.{$tryslot}?">
+          <set_value name="$tryslot" operation="add" exact="1"/>
+        </do_while>
+        <set_value name="$resolvedslot" exact="$tryslot"/>
+      </do_if>
+      <set_value name="$gateslots.{$resolvedslot}" exact="this.assignedcontrolled"/>
+
+      <!-- If we lead a wing, pre-claim slots for every subordinate and dispatch
+           each with its explicit slotindex. We do all the claiming up front so
+           the subs don't race each other against the shared table. -->
+      <do_if value="this.assignedcontrolled.subordinates.count gt 0">
+        <set_value name="$leadertotal" exact="this.assignedcontrolled.subordinates.count + 1"/>
+        <do_if value="$resolvedsize lt $leadertotal">
+          <set_value name="$resolvedsize" exact="$leadertotal"/>
         </do_if>
-        <do_else>
-          <set_value name="$resolvedslot" exact="0"/>
-        </do_else>
+
+        <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
+          <set_value name="$subslot" exact="0"/>
+          <do_while value="$gateslots.{$subslot}?">
+            <set_value name="$subslot" operation="add" exact="1"/>
+          </do_while>
+          <set_value name="$gateslots.{$subslot}" exact="$LocSub"/>
+
+          <create_order id="'Blockade'" object="$LocSub" default="true">
+            <param name="target" value="$target"/>
+            <param name="distance" value="$distance"/>
+            <param name="engagerange" value="$engagerange"/>
+            <param name="pursuetargets" value="$pursuetargets"/>
+            <param name="attackonsight" value="$attackonsight"/>
+            <param name="hostileside" value="$hostileside"/>
+            <param name="formationsize" value="$resolvedsize"/>
+            <param name="slotindex" value="$subslot"/>
+            <param name="debugchance" value="$debugchance"/>
+          </create_order>
+        </do_for_each>
       </do_if>
 
       <do_if value="$resolvedsize le 0">
-        <set_value name="$resolvedsize" exact="1"/>
-      </do_if>
-      <do_if value="$resolvedslot ge $resolvedsize">
-        <set_value name="$resolvedslot" exact="$resolvedsize - 1"/>
+        <set_value name="$resolvedsize" exact="$resolvedslot + 1"/>
       </do_if>
     </do_if>
 
@@ -192,6 +221,11 @@
         <resume label="finish"/>
       </do_if>
 
+      <!-- Indicate transit on the map. move.generic / move_to below override this
+           with their own command actions while pathing; we restore standingby once
+           the ship reaches the slot. -->
+      <set_command_action commandaction="commandaction.flyingto" param="$target"/>
+
       <!-- Move to the assigned slot. We let move.generic handle pathing into the sector. -->
       <do_if value="this.sector != $targetsector">
         <run_script name="'move.generic'" result="$movesuccess">
@@ -233,10 +267,12 @@
                Tolerance scales with ship size so XL ships don't oscillate. -->
           <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
           <do_if value="$slotdist gt (this.ship.size + 1500m)">
+            <set_command_action commandaction="commandaction.flyingto" param="$target"/>
             <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" finishonapproach="true">
               <position value="$slotpos"/>
             </move_to>
           </do_if>
+          <set_command_action commandaction="commandaction.standingby"/>
           <wait min="30s" max="60s"/>
         </do_if>
         <do_else>
@@ -269,6 +305,14 @@
       </do_while>
 
       <label name="finish"/>
+
+      <!-- Release our slot in the shared occupancy table so successors can claim it.
+           Only clear the entry if it still maps to us — covers the case where this
+           ship's order was replaced by a fresh Blockade order (the new order will
+           have already overwritten the entry with its own ship ref). -->
+      <do_if value="@md.Blockade.$BBVarTable.$GateSlots.{$target}.{$resolvedslot} == this.assignedcontrolled">
+        <remove_value name="md.Blockade.$BBVarTable.$GateSlots.{$target}.{$resolvedslot}"/>
+      </do_if>
     </actions>
   </attention>
 </aiscript>

@@ -74,6 +74,9 @@
 				<do_if value="(not $BBVT.$ActiveBlockades?) or ($BBVT.$ActiveBlockades == null)">
 					<set_value name="$BBVT.$ActiveBlockades" exact="table[]"/>
 				</do_if>
+				<do_if value="(not $BBVT.$GateSlots?) or ($BBVT.$GateSlots == null)">
+					<set_value name="$BBVT.$GateSlots" exact="table[]"/>
+				</do_if>
 				<do_if value="not $BBVT.$ExcludedFactions?">
 					<set_value name="$BBVT.$ExcludedFactions" exact="[faction.xenon, faction.khaak, faction.yaki, faction.scaleplate, faction.player, faction.civilian, faction.criminal, faction.smuggler, faction.visitor]"/>
 				</do_if>
@@ -134,7 +137,11 @@
 						<set_value name="$Sector" exact="$Gate.sector"/>
 						<set_value name="$Ships" exact="[]"/>
 						<set_value name="$TotalShips" exact="$BBVT.$MinFleetCapital + $BBVT.$MinFleetEscort + $BBVT.$MinFleetFighter"/>
-						<set_value name="$SpawnIdx" exact="0"/>
+
+						<!-- Ensure the per-gate occupancy bucket exists; spawned ships claim slots from it. -->
+						<do_if value="not $BBVT.$GateSlots.{$Gate}?">
+							<set_value name="$BBVT.$GateSlots.{$Gate}" exact="table[]"/>
+						</do_if>
 
 						<!-- Pick race-appropriate macros up front. -->
 						<set_value name="$Race" exact="$Defender.primaryrace"/>
@@ -219,7 +226,7 @@
 			</actions>
 		</cue>
 
-		<library name="LibrarySpawnOne" purpose="run_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Appends to $Ships and increments $SpawnIdx.">
+		<library name="LibrarySpawnOne" purpose="run_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Claims the next free slot in md.$BBVarTable.$GateSlots.{$Gate} and dispatches Blockade with that slot, so two factions blockading the same gate don't fight over positions.">
 			<actions>
 				<do_if value="$CurrentMacro != null">
 					<create_ship name="$LocShip" macro="$CurrentMacro" sector="$BBLocShipyard.sector">
@@ -228,16 +235,22 @@
 					</create_ship>
 					<do_if value="$LocShip">
 						<append_to_list name="$Ships" exact="$LocShip"/>
+
+						<set_value name="$LocClaimSlot" exact="0"/>
+						<do_while value="$BBVT.$GateSlots.{$Gate}.{$LocClaimSlot}?">
+							<set_value name="$LocClaimSlot" operation="add" exact="1"/>
+						</do_while>
+						<set_value name="$BBVT.$GateSlots.{$Gate}.{$LocClaimSlot}" exact="$LocShip"/>
+
 						<create_order id="'Blockade'" object="$LocShip" default="true">
 							<param name="target" value="$Gate"/>
 							<param name="distance" value="$BBVT.$BlockadeDistance"/>
 							<param name="formationsize" value="$TotalShips"/>
-							<param name="slotindex" value="$SpawnIdx"/>
+							<param name="slotindex" value="$LocClaimSlot"/>
 						</create_order>
 					</do_if>
 					<remove_value name="$LocShip"/>
 				</do_if>
-				<set_value name="$SpawnIdx" operation="add" exact="1"/>
 			</actions>
 		</library>
 
