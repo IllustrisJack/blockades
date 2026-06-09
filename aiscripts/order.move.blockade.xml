@@ -92,27 +92,45 @@
       </do_else>
     </do_if>
 
-    <!-- Resolve formation size and slot. If unset, derive from this ship's position
-         in its commander's subordinate group. Falls back to (1, 0) for solo ships. -->
+    <!-- Resolve formation size + slot. Three cases:
+         (a) explicit params from caller   → use as-is (MD-dispatched and leader-dispatched ships hit this path)
+         (b) this ship is a wing leader    → slot 0; iterate subordinates and assign Blockade to each with sequential slot index
+         (c) solo ship                     → (1, 0) -->
     <do_if value="not $abort?">
       <set_value name="$resolvedsize" exact="$formationsize"/>
       <set_value name="$resolvedslot" exact="$slotindex"/>
-      <do_if value="$resolvedsize le 0 or $resolvedslot lt 0">
-        <do_if value="@this.assignedcontrolled.commander and this.assignedcontrolled.subordinategroupid">
-          <set_value name="$siblings" exact="this.assignedcontrolled.commander.subordinates.{this.assignedcontrolled.subordinategroupid}"/>
+
+      <do_if value="$resolvedslot lt 0">
+        <do_if value="this.assignedcontrolled.subordinates.count gt 0">
+          <!-- Wing leader: take slot 0, dispatch sequential slots to subs. -->
+          <set_value name="$resolvedslot" exact="0"/>
           <do_if value="$resolvedsize le 0">
-            <set_value name="$resolvedsize" exact="$siblings.count"/>
+            <set_value name="$resolvedsize" exact="this.assignedcontrolled.subordinates.count + 1"/>
           </do_if>
-          <do_if value="$resolvedslot lt 0">
-            <set_value name="$resolvedslot" exact="$siblings.indexof.{this.assignedcontrolled} - 1"/>
-          </do_if>
+
+          <set_value name="$dispatchidx" exact="1"/>
+          <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
+            <create_order id="'Blockade'" object="$LocSub" default="true">
+              <param name="target" value="$target"/>
+              <param name="distance" value="$distance"/>
+              <param name="engagerange" value="$engagerange"/>
+              <param name="pursuetargets" value="$pursuetargets"/>
+              <param name="attackonsight" value="$attackonsight"/>
+              <param name="hostileside" value="$hostileside"/>
+              <param name="formationsize" value="$resolvedsize"/>
+              <param name="slotindex" value="$dispatchidx"/>
+              <param name="debugchance" value="$debugchance"/>
+            </create_order>
+            <set_value name="$dispatchidx" operation="add" exact="1"/>
+          </do_for_each>
         </do_if>
+        <do_else>
+          <set_value name="$resolvedslot" exact="0"/>
+        </do_else>
       </do_if>
+
       <do_if value="$resolvedsize le 0">
         <set_value name="$resolvedsize" exact="1"/>
-      </do_if>
-      <do_if value="$resolvedslot lt 0">
-        <set_value name="$resolvedslot" exact="0"/>
       </do_if>
       <do_if value="$resolvedslot ge $resolvedsize">
         <set_value name="$resolvedslot" exact="$resolvedsize - 1"/>
@@ -144,15 +162,20 @@
         <set_value name="$phi" exact="($resolvedslot - 13) * 2.0f * pi / 8.0f"/>
       </do_else>
 
-      <set_value name="$slotx" exact="$distance * sin($theta) * cos($phi)"/>
-      <set_value name="$sloty" exact="$distance * sin($theta) * sin($phi)"/>
-      <set_value name="$slotz" exact="$zsign * $distance * cos($theta)"/>
+      <!-- Scale effective distance by ship size so XL/L ships sit further out and
+           don't fight collision avoidance trying to share a slot with the gate or
+           with each other. this.ship.size returns a length in metres. -->
+      <set_value name="$effdistance" exact="$distance + this.ship.size"/>
+
+      <set_value name="$slotx" exact="$effdistance * sin($theta) * cos($phi)"/>
+      <set_value name="$sloty" exact="$effdistance * sin($theta) * sin($phi)"/>
+      <set_value name="$slotz" exact="$zsign * $effdistance * cos($theta)"/>
 
       <create_position name="$slotpos" space="$targetsector"
                        x="$slotx" y="$sloty" z="$slotz"
                        object="$target"/>
 
-      <debug_text text="'Blockade: gate %s, slot %s/%s, theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
+      <debug_text text="'Blockade: gate %s, slot %s/%s (size=%sm, effd=%sm), theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, this.ship.size, $effdistance, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
     </do_if>
 
     <set_value name="$inittime" exact="player.age"/>
@@ -196,36 +219,53 @@
 
       <set_order_syncpoint_reached order="this.ship.order"/>
 
+      <!-- Capital ships (L/XL) anchor the blockade: hold position, let turrets engage.
+           Escorts (M/S) actively patrol the engagement radius via move.seekenemies. -->
+      <set_value name="$isanchor" exact="this.ship.isclass.ship_l or this.ship.isclass.ship_xl"/>
+
       <do_while value="$target.exists">
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
           <resume label="finish"/>
         </do_if>
 
-        <!-- Re-fetch a safe position within the slot zone in case it became cluttered. -->
-        <do_if value="$slotzone.exists">
-          <create_position name="$zonepos" space="$slotzone" value="$slotpos" object="$targetsector"/>
-          <get_safe_pos result="$holdpos" zone="$slotzone" radius="this.ship.size / 2f" max="500m" value="$zonepos"/>
+        <do_if value="$isanchor">
+          <!-- Drift correction: re-issue move only when actually out of slot.
+               Tolerance scales with ship size so XL ships don't oscillate. -->
+          <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+          <do_if value="$slotdist gt (this.ship.size + 1500m)">
+            <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" finishonapproach="true">
+              <position value="$slotpos"/>
+            </move_to>
+          </do_if>
+          <wait min="30s" max="60s"/>
         </do_if>
         <do_else>
-          <set_value name="$holdpos" exact="$slotpos"/>
+          <!-- Re-fetch a safe position within the slot zone in case it became cluttered. -->
+          <do_if value="$slotzone.exists">
+            <create_position name="$zonepos" space="$slotzone" value="$slotpos" object="$targetsector"/>
+            <get_safe_pos result="$holdpos" zone="$slotzone" radius="this.ship.size / 2f" max="500m" value="$zonepos"/>
+          </do_if>
+          <do_else>
+            <set_value name="$holdpos" exact="$slotpos"/>
+          </do_else>
+
+          <run_script name="'move.seekenemies'">
+            <param name="destination" value="$slotzone"/>
+            <param name="pos" value="$holdpos"/>
+            <param name="pursuetargets" value="$pursuetargets"/>
+            <param name="pursuedistance" value="$engagerange"/>
+            <param name="radius" value="$engagerange"/>
+            <param name="radiusanchorpos" value="$slotpos"/>
+            <param name="radiusanchorspace" value="$targetsector"/>
+            <param name="engageonsight" value="$attackonsight"/>
+            <param name="enforceradius" value="true"/>
+            <param name="list_objectstoignore" value="$objectstoignore"/>
+            <param name="internalorder" value="true"/>
+            <param name="debugchance" value="$debugchance"/>
+          </run_script>
+
+          <wait exact="500ms"/>
         </do_else>
-
-        <run_script name="'move.seekenemies'">
-          <param name="destination" value="$slotzone"/>
-          <param name="pos" value="$holdpos"/>
-          <param name="pursuetargets" value="$pursuetargets"/>
-          <param name="pursuedistance" value="$engagerange"/>
-          <param name="radius" value="$engagerange"/>
-          <param name="radiusanchorpos" value="$slotpos"/>
-          <param name="radiusanchorspace" value="$targetsector"/>
-          <param name="engageonsight" value="$attackonsight"/>
-          <param name="enforceradius" value="true"/>
-          <param name="list_objectstoignore" value="$objectstoignore"/>
-          <param name="internalorder" value="true"/>
-          <param name="debugchance" value="$debugchance"/>
-        </run_script>
-
-        <wait exact="500ms"/>
       </do_while>
 
       <label name="finish"/>
