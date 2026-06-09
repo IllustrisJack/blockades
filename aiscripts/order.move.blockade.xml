@@ -17,21 +17,9 @@
       </param>
       <param name="pursuetargets" default="false" type="bool" text="{20810, 113}" advanced="true" comment="Pursue hostiles beyond the blockade ring."/>
       <param name="attackonsight" default="true" type="bool" text="{20810, 114}" advanced="true" comment="Attack hostiles on sight (vs. only when attacked)."/>
-      <param name="hostileside" default="0" type="int" text="{20810, 115}" advanced="true" comment="Which side of the gate: 0=auto, 1=destination-facing, -1=interior-facing.">
-        <input_param name="min" value="-1"/>
-        <input_param name="max" value="1"/>
-        <input_param name="step" value="1"/>
-      </param>
-      <param name="formationsize" type="int" default="0" advanced="true" text="{20810, 116}" comment="Total ships in formation. 0 = auto-detect from fleet.">
-        <input_param name="min" value="0"/>
-        <input_param name="max" value="32"/>
-        <input_param name="step" value="1"/>
-      </param>
-      <param name="slotindex" type="int" default="-1" advanced="true" text="{20810, 117}" comment="This ship's slot in the formation. -1 = auto-detect.">
-        <input_param name="min" value="-1"/>
-        <input_param name="max" value="31"/>
-        <input_param name="step" value="1"/>
-      </param>
+      <param name="hostileside" default="0" type="internal" comment="Which side of the gate: 0=auto, 1=destination-facing, -1=interior-facing."/>
+      <param name="formationsize" default="0" type="internal" comment="Total ships in formation. 0 = auto-detect from fleet."/>
+      <param name="slotindex" default="-1" type="internal" comment="This ship's slot in the formation. -1 = auto-detect."/>
       <param name="timeout" type="time" default="0s" infinitevalue="0s" text="{1041, 10034}" advanced="true" comment="Duration (0 = infinite).">
         <input_param name="max" value="1h"/>
         <input_param name="step" value="30s"/>
@@ -187,7 +175,6 @@
           <param name="destination" value="$targetsector"/>
           <param name="position" value="$slotpos"/>
           <param name="endintargetzone" value="true"/>
-          <param name="finishonapproach" value="true"/>
           <param name="debugchance" value="$debugchance"/>
         </run_script>
         <do_if value="not $movesuccess">
