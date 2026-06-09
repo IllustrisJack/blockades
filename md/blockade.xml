@@ -234,7 +234,7 @@
 			</actions>
 		</cue>
 
-		<library name="LibrarySpawnOne" purpose="run_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Appends to $Ships and dispatches Blockade with the next sequential slot in $SpawnIdx.">
+		<library name="LibrarySpawnOne" purpose="include_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Appends to $Ships and dispatches Blockade with the next sequential slot in $SpawnIdx. Called via &lt;include_actions&gt; — purpose='run_actions' would require &lt;run_actions&gt; with a result, which we don't need here.">
 			<actions>
 				<do_if value="$CurrentMacro != null">
 					<create_ship name="$LocShip" macro="$CurrentMacro" sector="$BBLocShipyard.sector">

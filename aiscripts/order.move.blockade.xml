@@ -149,7 +149,11 @@
             <do_if value="@$LocSub.order.id == 'Blockade'">
               <cancel_order order="$LocSub.order"/>
             </do_if>
-            <create_order id="'Blockade'" object="$LocSub" default="true">
+            <!-- default="false": issue as ACTIVE order, not just a queued default.
+                 default="true" only registers the default behavior; the sub's
+                 current escort assignment keeps running and the Blockade default
+                 never executes until the escort ends. Active order interrupts. -->
+            <create_order id="'Blockade'" object="$LocSub" default="false">
               <param name="target" value="$target"/>
               <param name="distance" value="$distance"/>
               <param name="engagerange" value="$engagerange"/>
@@ -261,20 +265,22 @@
 
       <set_order_syncpoint_reached order="this.ship.order"/>
 
-      <!-- Static blockade: every ship holds its slot and faces the gate (or away).
-           Combat is reactive — InterruptAttack handler routes the ship into vanilla
-           engagement scripts when it actually gets fired on, and the ship returns
-           to its slot afterward. This is the model that gives the user the
-           "real blockade, not flying around" feel. -->
+      <!-- Hold loop. Capital ships (L/XL) park and let turrets engage; the
+           InterruptAttack handler routes them into vanilla combat when fired on.
+           Smaller ships (S/M) need active patrol + engage-on-sight via vanilla
+           move.seekenemies anchored to their slot — without it nothing triggers
+           them to shoot anyone who flies past. The seekenemies radius is kept
+           tight (engagerange / 2 from the slot) so they patrol a small bubble
+           rather than wandering the whole sector. -->
+      <set_value name="$isanchor" exact="this.ship.isclass.ship_l or this.ship.isclass.ship_xl"/>
+      <set_value name="$patrolradius" exact="[$engagerange / 2.0f, this.ship.size + 2km].max"/>
+
       <do_while value="$target.exists">
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
           <resume label="finish"/>
         </do_if>
 
-        <!-- Commander watch: only fires for leaf ships (no subordinates of own).
-             A wing leader's own commander (e.g. the player's ship) will not have
-             a Blockade order — polling there would falsely abort the leader and
-             the engine would restart the default order in a tight loop. -->
+        <!-- Commander watch: only fires for leaf ships. -->
         <do_if value="this.assignedcontrolled.subordinates.count == 0
                       and this.assignedcontrolled.commander?">
           <do_if value="@this.assignedcontrolled.commander.order.id != 'Blockade'">
@@ -283,42 +289,62 @@
           </do_if>
         </do_if>
 
-        <!-- Recompute facing each tick so the ship continuously tracks the gate.
-             $lookaway=false → orientation ship→gate (nose at gate).
-             $lookaway=true  → orientation gate→ship (nose away from gate). -->
-        <do_if value="$lookaway">
-          <create_orientation name="$blockadeface" refposition="$target.position">
-            <position value="this.ship.position"/>
-          </create_orientation>
+        <do_if value="$isanchor">
+          <!-- ANCHOR: capitals. Park precisely, face the gate, sit.
+               No rotation-only move_to in the in-slot branch — the previous
+               version's destination=this.ship.zone with forceposition=false
+               appeared to nudge the ship subtly, producing the 'circling slot'
+               behaviour. Only re-issue move_to when drift exceeds a generous
+               tolerance (size + 3km) so the ship genuinely sits idle in between. -->
+          <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+          <do_if value="$slotdist gt (this.ship.size + 3km)">
+            <set_command_action commandaction="commandaction.flyingto" param="$target"/>
+            <do_if value="$lookaway">
+              <create_orientation name="$blockadeface" refposition="$target.position">
+                <position value="this.ship.position"/>
+              </create_orientation>
+            </do_if>
+            <do_else>
+              <create_orientation name="$blockadeface" refposition="this.ship.position">
+                <position object="$target"/>
+              </create_orientation>
+            </do_else>
+            <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" precise="true" forcerotation="true">
+              <position value="$slotpos"/>
+              <rotation value="$blockadeface"/>
+            </move_to>
+          </do_if>
+          <set_command_action commandaction="commandaction.standingby"/>
+          <wait min="20s" max="40s"/>
         </do_if>
         <do_else>
-          <create_orientation name="$blockadeface" refposition="this.ship.position">
-            <position object="$target"/>
-          </create_orientation>
-        </do_else>
+          <!-- ESCORT: small/medium. Active engagement in a tight bubble around
+               the slot. seekenemies returns when no targets and the loop ticks
+               again, picking up a new slot reference if drift happened. -->
+          <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
+          <do_if value="$slotzone">
+            <create_position name="$zonepos" space="$slotzone" value="$slotpos" object="$targetsector"/>
+          </do_if>
+          <do_else>
+            <set_value name="$zonepos" exact="$slotpos"/>
+          </do_else>
 
-        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt (this.ship.size + 1500m)">
-          <!-- Out of slot: full move_to with position + rotation. -->
-          <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-          <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" finishonapproach="true" forcerotation="true">
-            <position value="$slotpos"/>
-            <rotation value="$blockadeface"/>
-          </move_to>
-        </do_if>
-        <do_else>
-          <!-- In slot: rotation-only update. Vanilla idiom is destination=this.ship.zone
-               with no <position> child — providing a <position> while forceposition="false"
-               appears to short-circuit the rotation, so we omit it. -->
-          <move_to object="this.ship" destination="this.ship.zone" forceposition="false" forcerotation="true">
-            <rotation value="$blockadeface"/>
-          </move_to>
+          <run_script name="'move.seekenemies'">
+            <param name="destination" value="$slotzone"/>
+            <param name="pos" value="$zonepos"/>
+            <param name="pursuetargets" value="$pursuetargets"/>
+            <param name="pursuedistance" value="$engagerange"/>
+            <param name="radius" value="$patrolradius"/>
+            <param name="radiusanchorpos" value="$slotpos"/>
+            <param name="radiusanchorspace" value="$targetsector"/>
+            <param name="engageonsight" value="$attackonsight"/>
+            <param name="enforceradius" value="true"/>
+            <param name="list_objectstoignore" value="$objectstoignore"/>
+            <param name="internalorder" value="true"/>
+            <param name="debugchance" value="$debugchance"/>
+          </run_script>
+          <wait exact="1s"/>
         </do_else>
-
-        <set_command_action commandaction="commandaction.standingby"/>
-        <!-- Short interval so the commander-watch poll above reacts quickly
-             when the leader gets a new order or has theirs cancelled. -->
-        <wait min="5s" max="8s"/>
       </do_while>
 
       <label name="finish"/>
