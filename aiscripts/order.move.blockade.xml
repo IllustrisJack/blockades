@@ -60,7 +60,11 @@
     </handler>
   </interrupts>
   <init>
-    <set_command command="command.patrol"/>
+    <!-- command.blockade doesn't exist in the engine enum (hardcoded list, not
+         mod-extendable). command.protect with the gate as param gives the closest
+         vanilla feel — UI shows "Protect [gate name]" rather than the generic
+         "Patrolling" label. Same pattern vanilla uses for protect.ship/station. -->
+    <set_command command="command.protect" param="$target"/>
 
     <!-- Validate target -->
     <do_if value="not $target or not $target.exists or not $target.isclass.gate">
