@@ -303,6 +303,44 @@
 						<remove_value name="$BBVT.$ActiveBlockades.{$LocKey}"/>
 					</do_if>
 				</do_for_each>
+
+				<!-- Stale-slot reaper. Walk $GateSlots and remove entries whose ship
+				     no longer exists, isn't operational, or is no longer running the
+				     Blockade order. Drops the whole gate bucket once empty. Covers
+				     interrupt paths that bypass the order's finish-label cleanup. -->
+				<do_for_each name="$LocGateKey" in="$BBVT.$GateSlots.keys.list">
+					<do_if value="not @$LocGateKey.exists">
+						<remove_value name="$BBVT.$GateSlots.{$LocGateKey}"/>
+					</do_if>
+					<do_else>
+						<set_value name="$LocSlots" exact="$BBVT.$GateSlots.{$LocGateKey}"/>
+						<do_for_each name="$LocSlotIdx" in="$LocSlots.keys.list">
+							<set_value name="$LocSlotShip" exact="$LocSlots.{$LocSlotIdx}"/>
+							<set_value name="$LocStale" exact="false"/>
+							<do_if value="not @$LocSlotShip.exists">
+								<set_value name="$LocStale" exact="true"/>
+							</do_if>
+							<do_elseif value="not $LocSlotShip.isoperational">
+								<set_value name="$LocStale" exact="true"/>
+							</do_elseif>
+							<do_elseif value="not $LocSlotShip.order?">
+								<set_value name="$LocStale" exact="true"/>
+							</do_elseif>
+							<do_elseif value="$LocSlotShip.order.id != 'Blockade'">
+								<set_value name="$LocStale" exact="true"/>
+							</do_elseif>
+							<do_if value="$LocStale">
+								<remove_value name="$LocSlots.{$LocSlotIdx}"/>
+								<do_if value="$BBVT.$DebugDetailed">
+									<debug_text text="'BB: reaped stale slot %s at gate %s.'.[$LocSlotIdx, @$LocGateKey.knownname]" filter="general"/>
+								</do_if>
+							</do_if>
+						</do_for_each>
+						<do_if value="$LocSlots.keys.count == 0">
+							<remove_value name="$BBVT.$GateSlots.{$LocGateKey}"/>
+						</do_if>
+					</do_else>
+				</do_for_each>
 			</actions>
 		</cue>
 
