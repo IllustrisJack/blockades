@@ -74,34 +74,24 @@
       <set_value name="$abort"/>
     </do_if>
 
-    <!-- "Already blockaded" check. If any ship of a DIFFERENT faction within
-         25km of the gate is already running Blockade, abort the order.
-         Nested do_if for each conjunct because X4's expression evaluator does
-         NOT short-circuit AND chains — every conjunct's property access is
-         evaluated regardless of earlier conjunct results. -->
+    <!-- "Already blockaded" check. Use @chain.field safe-read — vanilla pattern.
+         @$X.order.id propagates null through the whole chain, so null == 'Blockade'
+         is just false (no parser/runtime error). Earlier attempts using $X.order?
+         failed because ? checks schema-definedness, not value-non-null, and the
+         engine evaluates every conjunct in an AND chain regardless. -->
     <do_if value="not $abort?">
       <find_ship name="$LocSectorShips" space="$target.sector" multiple="true"/>
       <do_for_each name="$LocOtherShip" in="$LocSectorShips">
-        <do_if value="not $abort?">
-          <do_if value="$LocOtherShip != this.assignedcontrolled">
-            <do_if value="$LocOtherShip.owner != this.assignedcontrolled.owner">
-              <do_if value="$LocOtherShip.order?">
-                <do_if value="$LocOtherShip.order.id == 'Blockade'">
-                  <do_if value="$LocOtherShip.distanceto.{$target} lt 25km">
-                    <debug_text text="'Blockade: %s already blockaded by %s; aborting.'.[$target.knownname, $LocOtherShip.owner.name]" chance="$debugchance"/>
-                    <!-- set_order_failed requires this.assignedcontrolled.order
-                         to be the current order, which it isn't yet during init
-                         for dispatched subs — would error 'null is not of type
-                         order'. Guard it. -->
-                    <do_if value="this.assignedcontrolled.order?">
-                      <set_order_failed order="this.assignedcontrolled.order" text="{20810, 119}"/>
-                    </do_if>
-                    <set_value name="$abort"/>
-                  </do_if>
-                </do_if>
-              </do_if>
-            </do_if>
-          </do_if>
+        <do_if value="not $abort?
+                      and ($LocOtherShip != this.assignedcontrolled)
+                      and ($LocOtherShip.owner != this.assignedcontrolled.owner)
+                      and (@$LocOtherShip.order.id == 'Blockade')
+                      and ($LocOtherShip.distanceto.{$target} lt 25km)">
+          <debug_text text="'Blockade: %s already blockaded by %s; aborting.'.[$target.knownname, $LocOtherShip.owner.name]" chance="$debugchance"/>
+          <!-- set_order_failed needs the order to be the ship's *current* order,
+               which it isn't during init for dispatched subs. Skip the failure
+               status and just flag $abort; the actions block resumes finish. -->
+          <set_value name="$abort"/>
         </do_if>
       </do_for_each>
     </do_if>
@@ -156,10 +146,8 @@
           <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
             <!-- Re-apply: clear any prior Blockade on this sub so it picks up
                  fresh params (slot, facing, distance) instead of resuming stale state. -->
-            <do_if value="$LocSub.order?">
-              <do_if value="$LocSub.order.id == 'Blockade'">
-                <cancel_order order="$LocSub.order"/>
-              </do_if>
+            <do_if value="@$LocSub.order.id == 'Blockade'">
+              <cancel_order order="$LocSub.order"/>
             </do_if>
             <create_order id="'Blockade'" object="$LocSub" default="true">
               <param name="target" value="$target"/>
@@ -283,18 +271,15 @@
           <resume label="finish"/>
         </do_if>
 
-        <!-- Commander watch: there is no event_object_changed_order in 9.0,
-             so we poll. Latency = wait interval below. Two-step probe because
-             @X? is invalid in 9.0 — @ and ? can't combine. -->
+        <!-- Commander watch: no event_object_changed_order in 9.0, so we poll.
+             Latency = wait interval below. Safe-read the commander's order id —
+             null != 'Blockade' is true, triggering abort cleanly. The outer
+             commander? guard skips solo ships. -->
         <do_if value="this.assignedcontrolled.commander?">
-          <do_if value="not this.assignedcontrolled.commander.order?">
-            <debug_text text="'Blockade: commander has no order, sub aborting.'" chance="$debugchance"/>
+          <do_if value="@this.assignedcontrolled.commander.order.id != 'Blockade'">
+            <debug_text text="'Blockade: commander dropped Blockade order, sub aborting.'" chance="$debugchance"/>
             <resume label="finish"/>
           </do_if>
-          <do_elseif value="this.assignedcontrolled.commander.order.id != 'Blockade'">
-            <debug_text text="'Blockade: commander switched off Blockade, sub aborting.'" chance="$debugchance"/>
-            <resume label="finish"/>
-          </do_elseif>
         </do_if>
 
         <!-- Recompute facing each tick so the ship continuously tracks the gate.
@@ -342,10 +327,8 @@
            player is handled by each sub's own commander-watch in the loop above. -->
       <do_if value="this.assignedcontrolled.subordinates.count gt 0">
         <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-          <do_if value="$LocSub.order?">
-            <do_if value="$LocSub.order.id == 'Blockade'">
-              <cancel_order order="$LocSub.order"/>
-            </do_if>
+          <do_if value="@$LocSub.order.id == 'Blockade'">
+            <cancel_order order="$LocSub.order"/>
           </do_if>
         </do_for_each>
       </do_if>
@@ -357,10 +340,8 @@
   <on_abort>
     <do_if value="this.assignedcontrolled.subordinates.count gt 0">
       <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-        <do_if value="$LocSub.order?">
-          <do_if value="$LocSub.order.id == 'Blockade'">
-            <cancel_order order="$LocSub.order"/>
-          </do_if>
+        <do_if value="@$LocSub.order.id == 'Blockade'">
+          <cancel_order order="$LocSub.order"/>
         </do_if>
       </do_for_each>
     </do_if>
