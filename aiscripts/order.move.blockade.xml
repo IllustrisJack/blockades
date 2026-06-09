@@ -271,11 +271,12 @@
           <resume label="finish"/>
         </do_if>
 
-        <!-- Commander watch: no event_object_changed_order in 9.0, so we poll.
-             Latency = wait interval below. Safe-read the commander's order id —
-             null != 'Blockade' is true, triggering abort cleanly. The outer
-             commander? guard skips solo ships. -->
-        <do_if value="this.assignedcontrolled.commander?">
+        <!-- Commander watch: only fires for leaf ships (no subordinates of own).
+             A wing leader's own commander (e.g. the player's ship) will not have
+             a Blockade order — polling there would falsely abort the leader and
+             the engine would restart the default order in a tight loop. -->
+        <do_if value="this.assignedcontrolled.subordinates.count == 0
+                      and this.assignedcontrolled.commander?">
           <do_if value="@this.assignedcontrolled.commander.order.id != 'Blockade'">
             <debug_text text="'Blockade: commander dropped Blockade order, sub aborting.'" chance="$debugchance"/>
             <resume label="finish"/>
