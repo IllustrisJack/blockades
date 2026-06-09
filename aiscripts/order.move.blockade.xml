@@ -196,33 +196,30 @@
           </do_else>
 
           <!-- Clear stale default to break any prior dispatch from us. -->
-          <do_if value="@$LocSub.defaultorder.id == 'ProtectPosition'
-                        or @$LocSub.defaultorder.id == 'MoveWait'
+          <do_if value="@$LocSub.defaultorder.id == 'MoveWait'
+                        or @$LocSub.defaultorder.id == 'ProtectPosition'
                         or @$LocSub.defaultorder.id == 'Blockade'">
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
 
-          <!-- Dispatch ProtectPosition (vanilla "defend this position" order).
-               attackonsight=true means subs proactively engage hostiles in range,
-               not just react to being shot — that's what gives us "engage anything
-               coming through the gate". enforceradius=true keeps subs anchored
-               to the slot area. Two creates: default=true persistent (sub returns
-               here after any combat resolves) + default=false immediate=true to
-               override the sub's existing escort/idle state. -->
-          <create_order id="'ProtectPosition'" object="$LocSub" default="true">
+          <!-- MoveWait positioned ships correctly in testing; ProtectPosition's
+               internal activepatrol scatters them. Subs run MoveWait at their
+               slot (vanilla position-and-hold). Proactive engagement comes from
+               the leader's hold loop below, which scans and dispatches
+               AttackInRange to subs when hostiles enter the gate area; subs
+               engage, then fall back to MoveWait default and return to slot. -->
+          <create_order id="'MoveWait'" object="$LocSub" default="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
-            <param name="radius" value="$engagerange"/>
-            <param name="attackonsight" value="$attackonsight"/>
-            <param name="pursuetargets" value="$pursuetargets"/>
-            <param name="enforceradius" value="true"/>
+            <param name="lookat" value="$LocLookatPos"/>
+            <param name="timeout" value="0s"/>
+            <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
-          <create_order id="'ProtectPosition'" object="$LocSub" default="false" immediate="true">
+          <create_order id="'MoveWait'" object="$LocSub" default="false" immediate="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
-            <param name="radius" value="$engagerange"/>
-            <param name="attackonsight" value="$attackonsight"/>
-            <param name="pursuetargets" value="$pursuetargets"/>
-            <param name="enforceradius" value="true"/>
+            <param name="lookat" value="$LocLookatPos"/>
+            <param name="timeout" value="0s"/>
+            <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
 
@@ -315,19 +312,23 @@
 
       <set_order_syncpoint_reached order="this.ship.order"/>
 
-      <!-- Bastion hold loop. We're a leader (or solo) — just sit at our slot.
-           Subs run vanilla MoveWait orders dispatched in init, which handle
-           their own positioning + combat (turrets + InterruptAttack). Vanilla
-           combat for the leader works the same way: turrets engage, InterruptAttack
-           routes the ship into combat when fired upon, then back to this Blockade
-           order. We don't actively scan or dispatch attacks. -->
+      <!-- Bastion hold loop with proactive engagement coordination.
+           Leader sits at slot. Each iteration:
+             1. Drift correction if we're out of slot.
+             2. Scan for hostiles near the gate (engagerange radius around
+                $target). If any found, dispatch create_order AttackInRange to
+                each sub anchored at sub's own slot. Each sub's MoveWait
+                aborts; AttackInRange runs; when target is gone, sub falls back
+                to MoveWait default → returns to its slot.
+             3. Wait, repeat.
+           The leader's own combat is handled by vanilla turrets + InterruptAttack
+           handler. We don't need to dispatch attacks to ourselves. -->
       <do_while value="$target.exists">
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
           <resume label="finish"/>
         </do_if>
 
-        <!-- Drift correction: only refly if genuinely out of position. The wait
-             below is long so the ship truly sits idle between checks. -->
+        <!-- Drift correction. -->
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
         <do_if value="$slotdist gt (this.ship.size + 3km)">
           <set_command_action commandaction="commandaction.flyingto" param="$target"/>
@@ -340,8 +341,37 @@
           </run_script>
         </do_if>
 
+        <!-- Proactive engagement: scan for ANY enemy ship near the gate. If
+             found, dispatch AttackInRange to each sub. Subs engage everything
+             in range of their own slot, then fall back to MoveWait. -->
+        <do_if value="this.assignedcontrolled.subordinates.count gt 0">
+          <find_object name="$LocBlockadeHostile"
+                       object="$target"
+                       space="$targetsector"
+                       max="$engagerange"
+                       relation="enemy"
+                       class="class.ship"
+                       multiple="false"/>
+          <do_if value="$LocBlockadeHostile">
+            <debug_text text="'Blockade: hostile %s detected at gate, dispatching subs to engage.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
+            <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
+              <!-- Only dispatch if sub is currently on MoveWait (not already
+                   in combat from a prior dispatch). -->
+              <do_if value="@$LocSub.order.id == 'MoveWait'">
+                <create_order id="'AttackInRange'" object="$LocSub" default="false" immediate="true">
+                  <param name="destination" value="[$targetsector, $slotpos]"/>
+                  <param name="radius" value="$engagerange"/>
+                  <param name="pursuetargets" value="$pursuetargets"/>
+                  <param name="enforceradius" value="true"/>
+                  <param name="debugchance" value="$debugchance"/>
+                </create_order>
+              </do_if>
+            </do_for_each>
+          </do_if>
+        </do_if>
+
         <set_command_action commandaction="commandaction.standingby"/>
-        <wait min="30s" max="60s"/>
+        <wait min="10s" max="20s"/>
       </do_while>
 
       <label name="finish"/>
@@ -352,10 +382,10 @@
            cancel_order on $ship.defaultorder. -->
       <do_if value="this.assignedcontrolled.subordinates.count gt 0">
         <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-          <do_if value="@$LocSub.order.id == 'ProtectPosition'">
+          <do_if value="@$LocSub.order.id == 'MoveWait' or @$LocSub.order.id == 'AttackInRange'">
             <cancel_order order="$LocSub.order"/>
           </do_if>
-          <do_if value="@$LocSub.defaultorder.id == 'ProtectPosition'">
+          <do_if value="@$LocSub.defaultorder.id == 'MoveWait'">
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
         </do_for_each>
