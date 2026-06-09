@@ -109,9 +109,12 @@
       <set_value name="$resolvedsize" exact="$formationsize"/>
       <set_value name="$resolvedslot" exact="$slotindex"/>
 
-      <!-- Ensure the global occupancy table exists. -->
+      <!-- Ensure the global occupancy table exists. From an aiscript, the MD
+           script's variables are addressed as md.<mdscript>.<var>, both for
+           reads AND writes. Earlier revisions wrote md.$BBVarTable (no script
+           qualifier) which silently created the variable in the wrong scope. -->
       <do_if value="not md.Blockade.$BBVarTable?">
-        <set_value name="md.$BBVarTable" exact="table[]"/>
+        <set_value name="md.Blockade.$BBVarTable" exact="table[]"/>
       </do_if>
       <do_if value="not md.Blockade.$BBVarTable.$GateSlots?">
         <set_value name="md.Blockade.$BBVarTable.$GateSlots" exact="table[]"/>
