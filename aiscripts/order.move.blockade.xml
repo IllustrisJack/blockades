@@ -233,47 +233,36 @@
         <resume label="finish"/>
       </do_if>
 
-      <!-- Indicate transit on the map. move.generic / move_to below override this
-           with their own command actions while pathing; we restore standingby once
-           the ship reaches the slot. -->
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
 
-      <!-- Move to the assigned slot. We let move.generic handle pathing into the sector. -->
-      <do_if value="this.sector != $targetsector">
-        <run_script name="'move.generic'" result="$movesuccess">
-          <param name="destination" value="$targetsector"/>
-          <param name="position" value="$slotpos"/>
-          <param name="endintargetzone" value="true"/>
-          <param name="debugchance" value="$debugchance"/>
-        </run_script>
-        <do_if value="not $movesuccess">
-          <debug_text text="'Blockade: unable to reach target sector %s.'.[$targetsector.knownname]" chance="$debugchance"/>
-          <wait min="30s" max="60s"/>
-          <resume label="start"/>
-        </do_if>
-      </do_if>
-
-      <!-- Translate slot position into the local zone for seekenemies. -->
-      <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
-      <do_if value="not $slotzone">
-        <!-- Open space — fly direct, then re-resolve zone. -->
-        <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" finishonapproach="true">
-          <position value="$slotpos"/>
-        </move_to>
-        <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
+      <!-- Initial fly-to-slot via move.generic. Always run, regardless of sector —
+           leader was probably already in the gate's sector but at the wrong
+           position, and the old "only move if cross-sector" branch left them
+           sitting in place. move.generic handles pathing, safe-pos, lookat. -->
+      <run_script name="'move.generic'" result="$movesuccess">
+        <param name="destination" value="$targetsector"/>
+        <param name="position" value="$slotpos"/>
+        <param name="endintargetzone" value="true"/>
+        <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+        <param name="debugchance" value="$debugchance"/>
+      </run_script>
+      <do_if value="not $movesuccess">
+        <debug_text text="'Blockade: unable to reach slot in %s.'.[$targetsector.knownname]" chance="$debugchance"/>
+        <wait min="30s" max="60s"/>
+        <resume label="start"/>
       </do_if>
 
       <set_order_syncpoint_reached order="this.ship.order"/>
 
-      <!-- Hold loop. Capital ships (L/XL) park and let turrets engage; the
-           InterruptAttack handler routes them into vanilla combat when fired on.
-           Smaller ships (S/M) need active patrol + engage-on-sight via vanilla
-           move.seekenemies anchored to their slot — without it nothing triggers
-           them to shoot anyone who flies past. The seekenemies radius is kept
-           tight (engagerange / 2 from the slot) so they patrol a small bubble
-           rather than wandering the whole sector. -->
+      <!-- Hold loop. Per-class behaviour:
+             L/XL  — Anchor. Drift > size+3km re-flies via move.generic.
+                     Combat: turrets engage automatically; InterruptAttack handler
+                     routes them into vanilla combat scripts when fired upon.
+             S/M   — Active. move.seekenemies with a TIGHT radius (engagerange
+                     anchored at slot, enforceradius=true). The ship engages
+                     hostiles within that bubble and returns to slot after.
+                     Tighter radius = less observed wandering between engagements. -->
       <set_value name="$isanchor" exact="this.ship.isclass.ship_l or this.ship.isclass.ship_xl"/>
-      <set_value name="$patrolradius" exact="[$engagerange / 2.0f, this.ship.size + 2km].max"/>
 
       <do_while value="$target.exists">
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
@@ -290,37 +279,25 @@
         </do_if>
 
         <do_if value="$isanchor">
-          <!-- ANCHOR: capitals. Park precisely, face the gate, sit.
-               No rotation-only move_to in the in-slot branch — the previous
-               version's destination=this.ship.zone with forceposition=false
-               appeared to nudge the ship subtly, producing the 'circling slot'
-               behaviour. Only re-issue move_to when drift exceeds a generous
-               tolerance (size + 3km) so the ship genuinely sits idle in between. -->
+          <!-- L/XL anchor: drift > size+3km re-fly via move.generic; otherwise sit. -->
           <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
           <do_if value="$slotdist gt (this.ship.size + 3km)">
             <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-            <do_if value="$lookaway">
-              <create_orientation name="$blockadeface" refposition="$target.position">
-                <position value="this.ship.position"/>
-              </create_orientation>
-            </do_if>
-            <do_else>
-              <create_orientation name="$blockadeface" refposition="this.ship.position">
-                <position object="$target"/>
-              </create_orientation>
-            </do_else>
-            <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" precise="true" forcerotation="true">
-              <position value="$slotpos"/>
-              <rotation value="$blockadeface"/>
-            </move_to>
+            <run_script name="'move.generic'" result="$movesuccess">
+              <param name="destination" value="$targetsector"/>
+              <param name="position" value="$slotpos"/>
+              <param name="endintargetzone" value="true"/>
+              <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+              <param name="debugchance" value="$debugchance"/>
+            </run_script>
           </do_if>
           <set_command_action commandaction="commandaction.standingby"/>
           <wait min="20s" max="40s"/>
         </do_if>
         <do_else>
-          <!-- ESCORT: small/medium. Active engagement in a tight bubble around
-               the slot. seekenemies returns when no targets and the loop ticks
-               again, picking up a new slot reference if drift happened. -->
+          <!-- S/M escort: seekenemies anchored to slot with a tight engagement
+               radius. After engagement, seekenemies returns; outer loop ticks
+               and we re-anchor to slot. -->
           <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
           <do_if value="$slotzone">
             <create_position name="$zonepos" space="$slotzone" value="$slotpos" object="$targetsector"/>
@@ -334,7 +311,7 @@
             <param name="pos" value="$zonepos"/>
             <param name="pursuetargets" value="$pursuetargets"/>
             <param name="pursuedistance" value="$engagerange"/>
-            <param name="radius" value="$patrolradius"/>
+            <param name="radius" value="$engagerange"/>
             <param name="radiusanchorpos" value="$slotpos"/>
             <param name="radiusanchorspace" value="$targetsector"/>
             <param name="engageonsight" value="$attackonsight"/>
@@ -343,7 +320,20 @@
             <param name="internalorder" value="true"/>
             <param name="debugchance" value="$debugchance"/>
           </run_script>
-          <wait exact="1s"/>
+          <!-- After seekenemies returns (no targets in range), re-anchor to slot.
+               If drift exceeds size+500m, refly. This is what keeps subs from
+               drifting toward leader between iterations. -->
+          <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+          <do_if value="$slotdist gt (this.ship.size + 500m)">
+            <run_script name="'move.generic'" result="$movesuccess">
+              <param name="destination" value="$targetsector"/>
+              <param name="position" value="$slotpos"/>
+              <param name="endintargetzone" value="true"/>
+              <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+              <param name="debugchance" value="$debugchance"/>
+            </run_script>
+          </do_if>
+          <wait exact="2s"/>
         </do_else>
       </do_while>
 
