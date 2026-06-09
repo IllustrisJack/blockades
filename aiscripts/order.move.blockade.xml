@@ -149,10 +149,24 @@
             <do_if value="@$LocSub.order.id == 'Blockade'">
               <cancel_order order="$LocSub.order"/>
             </do_if>
-            <!-- default="false": issue as ACTIVE order, not just a queued default.
-                 default="true" only registers the default behavior; the sub's
-                 current escort assignment keeps running and the Blockade default
-                 never executes until the escort ends. Active order interrupts. -->
+            <!-- Two create_orders: default=true sets Blockade as the sub's
+                 persistent default behaviour (what they fall back to after any
+                 active order ends — including the AttackInRange dispatch in the
+                 hold loop below). default=false then pushes the same order as
+                 active so they actually start running it now rather than waiting
+                 for their previous behaviour to end. -->
+            <create_order id="'Blockade'" object="$LocSub" default="true">
+              <param name="target" value="$target"/>
+              <param name="distance" value="$distance"/>
+              <param name="engagerange" value="$engagerange"/>
+              <param name="pursuetargets" value="$pursuetargets"/>
+              <param name="attackonsight" value="$attackonsight"/>
+              <param name="hostileside" value="$hostileside"/>
+              <param name="lookaway" value="$lookaway"/>
+              <param name="formationsize" value="$resolvedsize"/>
+              <param name="slotindex" value="$dispidx"/>
+              <param name="debugchance" value="$debugchance"/>
+            </create_order>
             <create_order id="'Blockade'" object="$LocSub" default="false">
               <param name="target" value="$target"/>
               <param name="distance" value="$distance"/>
@@ -295,36 +309,17 @@
           <wait min="20s" max="40s"/>
         </do_if>
         <do_else>
-          <!-- S/M escort: seekenemies anchored to slot with a tight engagement
-               radius. After engagement, seekenemies returns; outer loop ticks
-               and we re-anchor to slot. -->
-          <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
-          <do_if value="$slotzone">
-            <create_position name="$zonepos" space="$slotzone" value="$slotpos" object="$targetsector"/>
-          </do_if>
-          <do_else>
-            <set_value name="$zonepos" exact="$slotpos"/>
-          </do_else>
-
-          <run_script name="'move.seekenemies'">
-            <param name="destination" value="$slotzone"/>
-            <param name="pos" value="$zonepos"/>
-            <param name="pursuetargets" value="$pursuetargets"/>
-            <param name="pursuedistance" value="$engagerange"/>
-            <param name="radius" value="$engagerange"/>
-            <param name="radiusanchorpos" value="$slotpos"/>
-            <param name="radiusanchorspace" value="$targetsector"/>
-            <param name="engageonsight" value="$attackonsight"/>
-            <param name="enforceradius" value="true"/>
-            <param name="list_objectstoignore" value="$objectstoignore"/>
-            <param name="internalorder" value="true"/>
-            <param name="debugchance" value="$debugchance"/>
-          </run_script>
-          <!-- After seekenemies returns (no targets in range), re-anchor to slot.
-               If drift exceeds size+500m, refly. This is what keeps subs from
-               drifting toward leader between iterations. -->
+          <!-- S/M escort: hard-stop idle behaviour.
+               1) drift correction: if off-slot, refly via move.generic
+               2) hostile scan: any enemy ship within $engagerange of THIS ship?
+                  if yes → create_order AttackInRange (this aborts the current
+                  Blockade order; sub engages; when AttackInRange completes the
+                  sub falls back to default behaviour, which the leader's init
+                  set to Blockade — so init re-runs and the sub anchors here again)
+               3) idle: short wait, loop. -->
           <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
           <do_if value="$slotdist gt (this.ship.size + 500m)">
+            <set_command_action commandaction="commandaction.flyingto" param="$target"/>
             <run_script name="'move.generic'" result="$movesuccess">
               <param name="destination" value="$targetsector"/>
               <param name="position" value="$slotpos"/>
@@ -333,7 +328,37 @@
               <param name="debugchance" value="$debugchance"/>
             </run_script>
           </do_if>
-          <wait exact="2s"/>
+
+          <find_object name="$LocHostile"
+                       object="this.ship"
+                       space="$targetsector"
+                       max="$engagerange"
+                       relation="enemy"
+                       class="class.ship"
+                       multiple="false"/>
+          <do_if value="$LocHostile">
+            <debug_text text="'Blockade: hostile %s in range, engaging.'.[$LocHostile.knownname]" chance="$debugchance"/>
+            <set_command_action commandaction="commandaction.attackingto" param="$LocHostile"/>
+            <!-- AttackInRange anchored to our slot, not to the hostile. The sub
+                 attacks everything within radius of slot, including this hostile.
+                 When the area clears, AttackInRange completes and we fall back
+                 to default behaviour (Blockade), which re-anchors us here. -->
+            <create_order id="'AttackInRange'" object="this.assignedcontrolled" default="false">
+              <param name="destination" value="[$targetsector, $slotpos]"/>
+              <param name="radius" value="$engagerange"/>
+              <param name="pursuetargets" value="$pursuetargets"/>
+              <param name="enforceradius" value="true"/>
+              <param name="debugchance" value="$debugchance"/>
+            </create_order>
+            <!-- Control returns here once the order has been created; the engine
+                 will run AttackInRange after this script yields. We resume_label
+                 finish so our on_abort doesn't fire twice — Blockade is about
+                 to be replaced anyway. -->
+            <resume label="finish"/>
+          </do_if>
+
+          <set_command_action commandaction="commandaction.standingby"/>
+          <wait min="5s" max="10s"/>
         </do_else>
       </do_while>
 
