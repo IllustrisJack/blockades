@@ -1,0 +1,285 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<mdscript name="Blockade" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="md.xsd">
+	<!--
+		Auto-blockade logic. Periodically scans every gate in the galaxy. For any
+		gate where the sector owner is at war with the destination-sector owner,
+		dispatches a blockade fleet from a defender-owned shipyard.
+
+		State table:
+			md.$BBVarTable — aliased as $BBVT.
+				$Enable                  bool   — master toggle
+				$ScanIntervalMin         int    — minutes between scans
+				$MinFleetCapital         int    — destroyers per blockade
+				$MinFleetEscort          int    — frigates per blockade
+				$MinFleetFighter         int    — fighters per blockade
+				$BlockadeDistance        length — passed as Blockade order distance
+				$DebugDetailed           bool
+				$ActiveBlockades         table[gate → blockadeEntry]
+				$ExcludedFactions        list of factions never spawning blockades
+
+		blockadeEntry layout:
+				$Faction          faction (owner of the blockade fleet)
+				$Gate             gate object
+				$Sector           sector the gate sits in
+				$Ships            list of ship objects
+				$EstablishedAt    timestamp
+				$LastCheckedAt    timestamp
+	-->
+
+	<cues>
+
+		<cue name="Init">
+			<conditions>
+				<event_game_started/>
+			</conditions>
+			<actions>
+				<set_value name="md.$BBVarTable" exact="table[]"/>
+				<signal_cue_instantly cue="VerifyVariables"/>
+			</actions>
+		</cue>
+
+		<cue name="OnLoad" instantiate="true">
+			<conditions>
+				<event_game_loaded/>
+			</conditions>
+			<actions>
+				<do_if value="(not md.$BBVarTable?) or (md.$BBVarTable == null)">
+					<set_value name="md.$BBVarTable" exact="table[]"/>
+				</do_if>
+				<signal_cue_instantly cue="VerifyVariables"/>
+			</actions>
+		</cue>
+
+		<!-- Re-init missing config keys, leave $ActiveBlockades intact across loads. -->
+		<cue name="VerifyVariables" instantiate="true">
+			<conditions>
+				<event_cue_signalled/>
+			</conditions>
+			<actions>
+				<set_value name="$BBVT" exact="md.$BBVarTable"/>
+				<do_if value="not $BBVT.$Enable?">
+					<set_value name="$BBVT.$Enable" exact="true"/>
+				</do_if>
+				<do_if value="not $BBVT.$ScanIntervalMin?">
+					<set_value name="$BBVT.$ScanIntervalMin" exact="30"/>
+				</do_if>
+				<do_if value="not $BBVT.$MinFleetCapital?">
+					<set_value name="$BBVT.$MinFleetCapital" exact="1"/>
+				</do_if>
+				<do_if value="not $BBVT.$MinFleetEscort?">
+					<set_value name="$BBVT.$MinFleetEscort" exact="3"/>
+				</do_if>
+				<do_if value="not $BBVT.$MinFleetFighter?">
+					<set_value name="$BBVT.$MinFleetFighter" exact="4"/>
+				</do_if>
+				<do_if value="not $BBVT.$BlockadeDistance?">
+					<set_value name="$BBVT.$BlockadeDistance" exact="6km"/>
+				</do_if>
+				<do_if value="not $BBVT.$DebugDetailed?">
+					<set_value name="$BBVT.$DebugDetailed" exact="false"/>
+				</do_if>
+				<do_if value="(not $BBVT.$ActiveBlockades?) or ($BBVT.$ActiveBlockades == null)">
+					<set_value name="$BBVT.$ActiveBlockades" exact="table[]"/>
+				</do_if>
+				<do_if value="not $BBVT.$ExcludedFactions?">
+					<set_value name="$BBVT.$ExcludedFactions" exact="[faction.xenon, faction.khaak, faction.yaki, faction.scaleplate, faction.player, faction.civilian, faction.criminal, faction.smuggler, faction.visitor]"/>
+				</do_if>
+			</actions>
+		</cue>
+
+		<cue name="TimerBlockadeScan" instantiate="true" checkinterval="30min" checktime="2min">
+			<conditions>
+				<check_value value="md.$BBVarTable.$Enable"/>
+			</conditions>
+			<actions>
+				<signal_cue_instantly cue="EventBlockadeMaintenance"/>
+				<signal_cue_instantly cue="EventBlockadeScan"/>
+			</actions>
+		</cue>
+
+		<cue name="EventBlockadeScan" instantiate="true">
+			<conditions>
+				<event_cue_signalled/>
+			</conditions>
+			<actions>
+				<set_value name="$BBVT" exact="md.$BBVarTable"/>
+
+				<!-- Walk every gate in the galaxy. For each, check (sector.owner)
+				     vs (destination.sector.owner). Dispatch a blockade if the two
+				     are at war, both are eligible, and we don't already cover this gate. -->
+				<find_gate name="$BBLocAllGates" space="player.galaxy" active="true" multiple="true"/>
+
+				<do_for_each name="$LocGate" in="$BBLocAllGates">
+					<do_if value="$LocGate.exists and $LocGate.destination.exists">
+						<set_value name="$Defender" exact="$LocGate.sector.owner"/>
+						<set_value name="$Attacker" exact="$LocGate.destination.sector.owner"/>
+
+						<do_if value="$Defender and $Attacker and ($Defender != $Attacker)">
+							<do_if value="$BBVT.$ExcludedFactions.indexof.{$Defender} == 0">
+								<do_if value="$BBVT.$ExcludedFactions.indexof.{$Attacker} == 0">
+									<do_if value="$Defender.mayattack.{$Attacker} and ($Defender.relationto.{$Attacker} le -0.25)">
+										<do_if value="not $BBVT.$ActiveBlockades.{$LocGate}?">
+											<signal_cue_instantly cue="EventDispatchBlockade" param="table[
+												$DefenderFaction = $Defender,
+												$AttackerFaction = $Attacker,
+												$Gate = $LocGate
+											]"/>
+										</do_if>
+									</do_if>
+								</do_if>
+							</do_if>
+						</do_if>
+					</do_if>
+				</do_for_each>
+			</actions>
+		</cue>
+
+		<cue name="EventDispatchBlockade" instantiate="true">
+			<conditions>
+				<event_cue_signalled/>
+			</conditions>
+			<actions>
+				<set_value name="$BBVT" exact="md.$BBVarTable"/>
+				<set_value name="$Defender" exact="event.param.$DefenderFaction"/>
+				<set_value name="$Gate" exact="event.param.$Gate"/>
+
+				<do_if value="not $Gate.exists">
+					<return/>
+				</do_if>
+
+				<find_station_by_true_owner name="$BBLocShipyard" faction="$Defender" space="player.galaxy" canbuildships="true"/>
+				<do_if value="not $BBLocShipyard">
+					<do_if value="$BBVT.$DebugDetailed">
+						<debug_text text="'BB: %s has no shipyard; skipping blockade at %s.'.[$Defender.name, @$Gate.knownname]" filter="general"/>
+					</do_if>
+					<return/>
+				</do_if>
+
+				<set_value name="$Sector" exact="$Gate.sector"/>
+				<set_value name="$Ships" exact="[]"/>
+				<set_value name="$TotalShips" exact="$BBVT.$MinFleetCapital + $BBVT.$MinFleetEscort + $BBVT.$MinFleetFighter"/>
+				<set_value name="$SpawnIdx" exact="0"/>
+
+				<do_for exact="$BBVT.$MinFleetCapital">
+					<include_actions ref="LibrarySpawnOne"/>
+				</do_for>
+				<set_value name="$CurrentTier" exact="'escort'"/>
+				<do_for exact="$BBVT.$MinFleetEscort">
+					<include_actions ref="LibrarySpawnOne"/>
+				</do_for>
+				<set_value name="$CurrentTier" exact="'fighter'"/>
+				<do_for exact="$BBVT.$MinFleetFighter">
+					<include_actions ref="LibrarySpawnOne"/>
+				</do_for>
+
+				<set_value name="$BBVT.$ActiveBlockades.{$Gate}" exact="table[
+					$Faction = $Defender,
+					$Gate = $Gate,
+					$Sector = $Sector,
+					$Ships = $Ships,
+					$EstablishedAt = player.age,
+					$LastCheckedAt = player.age
+				]"/>
+
+				<do_if value="$BBVT.$DebugDetailed">
+					<debug_text text="'BB: %s established blockade at %s (%s ships).'.[$Defender.name, $Gate.knownname, $Ships.count]" filter="general"/>
+				</do_if>
+			</actions>
+		</cue>
+
+		<library name="LibrarySpawnOne" purpose="run_actions" comment="Spawn one ship of $CurrentTier (or 'capital' if unset) at $BBLocShipyard for $Defender. Append to $Ships and increment $SpawnIdx.">
+			<actions>
+				<do_if value="not $CurrentTier?">
+					<set_value name="$CurrentTier" exact="'capital'"/>
+				</do_if>
+
+				<set_value name="$MacroTags" exact="[tag.ship, tag.combat]"/>
+				<do_if value="$CurrentTier == 'capital'">
+					<append_to_list name="$MacroTags" exact="tag.ship_l"/>
+				</do_if>
+				<do_elseif value="$CurrentTier == 'escort'">
+					<append_to_list name="$MacroTags" exact="tag.ship_m"/>
+				</do_elseif>
+				<do_else>
+					<append_to_list name="$MacroTags" exact="tag.ship_s"/>
+				</do_else>
+
+				<find_ship_macro name="$LocMacro" race="$Defender.primaryrace" tags="$MacroTags" matchtags="all"/>
+				<do_if value="not $LocMacro">
+					<find_ship_macro name="$LocMacro" tags="$MacroTags" matchtags="all"/>
+				</do_if>
+
+				<do_if value="$LocMacro">
+					<create_ship name="$LocShip" macro="$LocMacro" owner="$Defender" sector="$BBLocShipyard.sector">
+						<position object="$BBLocShipyard" max="5km"/>
+					</create_ship>
+					<do_if value="$LocShip">
+						<append_to_list name="$Ships" exact="$LocShip"/>
+						<create_order object="$LocShip" id="'Blockade'">
+							<param name="target" value="$Gate"/>
+							<param name="distance" value="$BBVT.$BlockadeDistance"/>
+							<param name="formationsize" value="$TotalShips"/>
+							<param name="slotindex" value="$SpawnIdx"/>
+						</create_order>
+					</do_if>
+				</do_if>
+
+				<set_value name="$SpawnIdx" operation="add" exact="1"/>
+				<remove_value name="$MacroTags"/>
+				<remove_value name="$LocMacro"/>
+				<remove_value name="$LocShip"/>
+			</actions>
+		</library>
+
+		<cue name="EventBlockadeMaintenance" instantiate="true">
+			<conditions>
+				<event_cue_signalled/>
+			</conditions>
+			<actions>
+				<set_value name="$BBVT" exact="md.$BBVarTable"/>
+				<do_for_each name="$LocKey" in="$BBVT.$ActiveBlockades.keys.list">
+					<set_value name="$Entry" exact="$BBVT.$ActiveBlockades.{$LocKey}"/>
+					<set_value name="$Defender" exact="$Entry.$Faction"/>
+					<set_value name="$Gate" exact="$Entry.$Gate"/>
+
+					<set_value name="$ShouldDisband" exact="false"/>
+					<do_if value="not $Gate.exists or not $Gate.destination.exists">
+						<set_value name="$ShouldDisband" exact="true"/>
+					</do_if>
+					<do_elseif value="$Gate.destination.sector.owner == $Defender">
+						<set_value name="$ShouldDisband" exact="true"/>
+					</do_elseif>
+					<do_elseif value="$Defender.relationto.{$Gate.destination.sector.owner} gt -0.1">
+						<set_value name="$ShouldDisband" exact="true"/>
+					</do_elseif>
+
+					<set_value name="$Alive" exact="[]"/>
+					<do_for_each name="$LocShip" in="$Entry.$Ships">
+						<do_if value="$LocShip.exists and $LocShip.isoperational">
+							<append_to_list name="$Alive" exact="$LocShip"/>
+						</do_if>
+					</do_for_each>
+					<set_value name="$Entry.$Ships" exact="$Alive"/>
+					<set_value name="$Entry.$LastCheckedAt" exact="player.age"/>
+
+					<do_if value="$Alive.count == 0">
+						<set_value name="$ShouldDisband" exact="true"/>
+					</do_if>
+
+					<do_if value="$ShouldDisband">
+						<do_if value="$BBVT.$DebugDetailed">
+							<debug_text text="'BB: disbanding blockade at %s.'.[@$Gate.knownname]" filter="general"/>
+						</do_if>
+						<do_for_each name="$LocShip" in="$Alive">
+							<do_if value="@$LocShip.order.id == 'Blockade'">
+								<cancel_order object="$LocShip"/>
+							</do_if>
+						</do_for_each>
+						<remove_value name="$BBVT.$ActiveBlockades.{$LocKey}"/>
+					</do_if>
+				</do_for_each>
+			</actions>
+		</cue>
+
+	</cues>
+</mdscript>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<content id="blockades" name="Blockades" description="Adds a Blockade default behavior. Ships hold a hemisphere formation on the hostile side of a target gate and engage transiting hostiles. AI factions at war auto-blockade enemy-facing gates in their claimspace." author="IllustrisJack" version="100" date="2026-06-09" save="0" enabled="1">
+	<dependency id="ego_dlc_split" optional="true" name="Split Vendetta"/>
+	<dependency id="ego_dlc_terran" optional="true" name="Cradle of Humanity"/>
+	<dependency id="ego_dlc_pirate" optional="true" name="Tides of Avarice"/>
+	<dependency id="ego_dlc_boron" optional="true" name="Fish People"/>
+	<dependency id="ego_dlc_timelines" optional="true" name="Not Sandbox DLC"/>
+	<dependency version="900"/>
+	<text language="7"  name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="33" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="34" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="39" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="42" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="44" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="48" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="49" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="55" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="81" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="82" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="86" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+	<text language="88" name="Blockades" description="Adds a Blockade default behavior. Ships hold formation around a target gate and engage hostiles." author="IllustrisJack"/>
+</content>

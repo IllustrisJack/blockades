@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<language>
+	<page id="20810" title="Blockades" descr="Strings for the Blockade default behavior, menus, and AI hooks." voice="no">
+
+		<!-- Order: name & description -->
+		<t id="100">Blockade</t>
+		<t id="101">Hold formation on the hostile side of a gate and engage transiting hostiles.</t>
+
+		<!-- Order: parameter labels -->
+		<t id="110">Gate</t>
+		<t id="111">Distance from Gate</t>
+		<t id="112">Engagement Range</t>
+		<t id="113">Pursue Targets</t>
+		<t id="114">Attack on Sight</t>
+		<t id="115">Side (0=auto / -1 / +1)</t>
+		<t id="116">Formation Size</t>
+		<t id="117">Slot Index</t>
+
+		<!-- Menus -->
+		<t id="200">Set Up Blockade</t>
+		<t id="201">Configure Blockade</t>
+		<t id="202">Cancel Blockade</t>
+		<t id="203">No suitable ships available</t>
+		<t id="204">Blockade target</t>
+		<t id="205">Ships</t>
+		<t id="206">Distance</t>
+		<t id="207">Apply</t>
+		<t id="208">No blockade configured for this gate</t>
+
+		<!-- AI -->
+		<t id="300">Blockade Settings</t>
+		<t id="301">Enable AI Blockades</t>
+		<t id="302">Min Fleet Size (Capital)</t>
+		<t id="303">Min Fleet Size (Escort)</t>
+		<t id="304">Check Interval</t>
+		<t id="305">Debug Output</t>
+
+		<!-- News / log -->
+		<t id="400">%s have established a blockade at the %s gate in %s.</t>
+		<t id="401">The blockade at %s has been disbanded.</t>
+
+	</page>
+</language>

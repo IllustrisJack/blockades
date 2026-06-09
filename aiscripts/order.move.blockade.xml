@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<aiscript name="order.move.blockade" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="aiscripts.xsd" version="1">
+  <order id="Blockade" name="{20810, 100}" description="{20810, 101}" category="combat" allowinloop="false">
+    <params>
+      <param name="target" type="object" text="{20810, 110}" comment="Gate to blockade.">
+        <input_param name="class" value="class.gate"/>
+      </param>
+      <param name="distance" type="length" default="6km" text="{20810, 111}" comment="Distance from gate (sphere radius).">
+        <input_param name="min" value="3km"/>
+        <input_param name="max" value="20km"/>
+        <input_param name="step" value="1km"/>
+      </param>
+      <param name="engagerange" type="length" default="this.ship.maxradarrange" text="{20810, 112}" comment="Engage hostiles within this range.">
+        <input_param name="min" value="3km"/>
+        <input_param name="max" value="[this.ship.maxradarrange, 3km].max"/>
+        <input_param name="step" value="1km"/>
+      </param>
+      <param name="pursuetargets" default="false" type="bool" text="{20810, 113}" advanced="true" comment="Pursue hostiles beyond the blockade ring."/>
+      <param name="attackonsight" default="true" type="bool" text="{20810, 114}" advanced="true" comment="Attack hostiles on sight (vs. only when attacked)."/>
+      <param name="hostileside" default="0" type="int" text="{20810, 115}" advanced="true" comment="Which side of the gate: 0=auto, 1=destination-facing, -1=interior-facing.">
+        <input_param name="min" value="-1"/>
+        <input_param name="max" value="1"/>
+        <input_param name="step" value="1"/>
+      </param>
+      <param name="formationsize" type="int" default="0" advanced="true" text="{20810, 116}" comment="Total ships in formation. 0 = auto-detect from fleet.">
+        <input_param name="min" value="0"/>
+        <input_param name="max" value="32"/>
+        <input_param name="step" value="1"/>
+      </param>
+      <param name="slotindex" type="int" default="-1" advanced="true" text="{20810, 117}" comment="This ship's slot in the formation. -1 = auto-detect.">
+        <input_param name="min" value="-1"/>
+        <input_param name="max" value="31"/>
+        <input_param name="step" value="1"/>
+      </param>
+      <param name="timeout" type="time" default="0s" infinitevalue="0s" text="{1041, 10034}" advanced="true" comment="Duration (0 = infinite).">
+        <input_param name="max" value="1h"/>
+        <input_param name="step" value="30s"/>
+      </param>
+      <param name="objectstoignore" default="[]" type="internal" comment="List of objects to be ignored"/>
+      <param name="debugchance" type="bool" default="0" advanced="true" text="{1041, 10086}" comment="Print debug output">
+        <input_param name="truevalue" value="100"/>
+      </param>
+    </params>
+    <requires>
+      <match shiptype="shiptype.lasertower" negate="true"/>
+      <match class="class.spacesuit" negate="true"/>
+    </requires>
+    <location object="$target"/>
+  </order>
+  <interrupts>
+    <handler ref="SectorChangeHandler"/>
+    <handler ref="ScannedHandler"/>
+    <handler ref="InspectedHandler"/>
+    <handler ref="TargetInvalidHandler"/>
+    <handler ref="TideHandler"/>
+    <handler>
+      <conditions>
+        <check_any>
+          <event_object_destroyed object="$target" check="false"/>
+          <event_object_changed_true_owner object="$target" check="false"/>
+        </check_any>
+      </conditions>
+      <actions>
+        <debug_text text="'blockade target gate %s no longer valid; finishing.'.[@$target.knownname]" chance="$debugchance"/>
+        <abort_called_scripts resume="finish"/>
+      </actions>
+    </handler>
+  </interrupts>
+  <init>
+    <set_command command="command.patrol"/>
+
+    <!-- Validate target -->
+    <do_if value="not $target or not $target.exists or not $target.isclass.gate">
+      <debug_text text="'Blockade: invalid target. Aborting.'" filter="error"/>
+      <set_value name="$abort"/>
+    </do_if>
+
+    <!-- Resolve sector. Gates live in a zone inside a sector. -->
+    <do_if value="not $abort?">
+      <set_value name="$targetsector" exact="$target.sector"/>
+      <do_if value="not $targetsector">
+        <debug_text text="'Blockade: target gate has no sector. Aborting.'" filter="error"/>
+        <set_value name="$abort"/>
+      </do_if>
+    </do_if>
+
+    <!-- Determine hostile-side sign. Vanilla deploys at z=-3km for accelerators and
+         z=+3km for jumpgates (see order.deployobjectsatgates.xml); we follow the
+         same convention so the formation lands on the "incoming traffic" side. -->
+    <do_if value="not $abort?">
+      <do_if value="$hostileside == 1">
+        <set_value name="$zsign" exact="1.0f"/>
+      </do_if>
+      <do_elseif value="$hostileside == -1">
+        <set_value name="$zsign" exact="-1.0f"/>
+      </do_elseif>
+      <do_else>
+        <do_if value="$target.isaccelerator">
+          <set_value name="$zsign" exact="-1.0f"/>
+        </do_if>
+        <do_else>
+          <set_value name="$zsign" exact="1.0f"/>
+        </do_else>
+      </do_else>
+    </do_if>
+
+    <!-- Resolve formation size and slot. If unset, derive from this ship's position
+         in its commander's subordinate group. Falls back to (1, 0) for solo ships. -->
+    <do_if value="not $abort?">
+      <set_value name="$resolvedsize" exact="$formationsize"/>
+      <set_value name="$resolvedslot" exact="$slotindex"/>
+      <do_if value="$resolvedsize le 0 or $resolvedslot lt 0">
+        <do_if value="@this.assignedcontrolled.commander and this.assignedcontrolled.subordinategroupid">
+          <set_value name="$siblings" exact="this.assignedcontrolled.commander.subordinates.{this.assignedcontrolled.subordinategroupid}"/>
+          <do_if value="$resolvedsize le 0">
+            <set_value name="$resolvedsize" exact="$siblings.count"/>
+          </do_if>
+          <do_if value="$resolvedslot lt 0">
+            <set_value name="$resolvedslot" exact="$siblings.indexof.{this.assignedcontrolled} - 1"/>
+          </do_if>
+        </do_if>
+      </do_if>
+      <do_if value="$resolvedsize le 0">
+        <set_value name="$resolvedsize" exact="1"/>
+      </do_if>
+      <do_if value="$resolvedslot lt 0">
+        <set_value name="$resolvedslot" exact="0"/>
+      </do_if>
+      <do_if value="$resolvedslot ge $resolvedsize">
+        <set_value name="$resolvedslot" exact="$resolvedsize - 1"/>
+      </do_if>
+    </do_if>
+
+    <!-- Compute slot coordinates in the gate's local frame.
+         Hemisphere layout:
+           slot 0          → center (theta=0,  directly in front)
+           slots 1..6      → inner ring (theta=30°)
+           slots 7..12     → outer ring (theta=60°)
+           slots 13+       → flat ring (theta=80°)
+         theta is the polar angle from the gate's +Z (hostile-side) axis. -->
+    <do_if value="not $abort?">
+      <do_if value="$resolvedslot == 0">
+        <set_value name="$theta" exact="0.0f"/>
+        <set_value name="$phi" exact="0.0f"/>
+      </do_if>
+      <do_elseif value="$resolvedslot le 6">
+        <set_value name="$theta" exact="30deg"/>
+        <set_value name="$phi" exact="($resolvedslot - 1) * 2.0f * pi / 6.0f"/>
+      </do_elseif>
+      <do_elseif value="$resolvedslot le 12">
+        <set_value name="$theta" exact="60deg"/>
+        <set_value name="$phi" exact="($resolvedslot - 7) * 2.0f * pi / 6.0f"/>
+      </do_elseif>
+      <do_else>
+        <set_value name="$theta" exact="80deg"/>
+        <set_value name="$phi" exact="($resolvedslot - 13) * 2.0f * pi / 8.0f"/>
+      </do_else>
+
+      <set_value name="$slotx" exact="$distance * sin($theta) * cos($phi)"/>
+      <set_value name="$sloty" exact="$distance * sin($theta) * sin($phi)"/>
+      <set_value name="$slotz" exact="$zsign * $distance * cos($theta)"/>
+
+      <create_position name="$slotpos" space="$targetsector"
+                       x="$slotx" y="$sloty" z="$slotz"
+                       object="$target"/>
+
+      <debug_text text="'Blockade: gate %s, slot %s/%s, theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
+    </do_if>
+
+    <set_value name="$inittime" exact="player.age"/>
+  </init>
+  <attention min="unknown">
+    <actions>
+      <do_if value="$abort?">
+        <resume label="finish"/>
+      </do_if>
+
+      <label name="start"/>
+
+      <do_if value="not $target.exists or not $target.isclass.gate">
+        <resume label="finish"/>
+      </do_if>
+
+      <!-- Move to the assigned slot. We let move.generic handle pathing into the sector. -->
+      <do_if value="this.sector != $targetsector">
+        <run_script name="'move.generic'" result="$movesuccess">
+          <param name="destination" value="$targetsector"/>
+          <param name="position" value="$slotpos"/>
+          <param name="endintargetzone" value="true"/>
+          <param name="finishonapproach" value="true"/>
+          <param name="debugchance" value="$debugchance"/>
+        </run_script>
+        <do_if value="not $movesuccess">
+          <debug_text text="'Blockade: unable to reach target sector %s.'.[$targetsector.knownname]" chance="$debugchance"/>
+          <wait min="30s" max="60s"/>
+          <resume label="start"/>
+        </do_if>
+      </do_if>
+
+      <!-- Translate slot position into the local zone for seekenemies. -->
+      <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
+      <do_if value="not $slotzone">
+        <!-- Open space — fly direct, then re-resolve zone. -->
+        <move_to object="this.ship" destination="$targetsector" uselocalhighways="false" finishonapproach="true">
+          <position value="$slotpos"/>
+        </move_to>
+        <get_zone_at_position name="$slotzone" sector="$targetsector" value="$slotpos"/>
+      </do_if>
+
+      <set_order_syncpoint_reached order="this.ship.order"/>
+
+      <do_while value="$target.exists">
+        <do_if value="$timeout and (player.age ge $inittime + $timeout)">
+          <resume label="finish"/>
+        </do_if>
+
+        <!-- Re-fetch a safe position within the slot zone in case it became cluttered. -->
+        <do_if value="$slotzone.exists">
+          <create_position name="$zonepos" space="$slotzone" value="$slotpos" object="$targetsector"/>
+          <get_safe_pos result="$holdpos" zone="$slotzone" radius="this.ship.size / 2f" max="500m" value="$zonepos"/>
+        </do_if>
+        <do_else>
+          <set_value name="$holdpos" exact="$slotpos"/>
+        </do_else>
+
+        <run_script name="'move.seekenemies'">
+          <param name="destination" value="$slotzone"/>
+          <param name="pos" value="$holdpos"/>
+          <param name="pursuetargets" value="$pursuetargets"/>
+          <param name="pursuedistance" value="$engagerange"/>
+          <param name="radius" value="$engagerange"/>
+          <param name="radiusanchorpos" value="$slotpos"/>
+          <param name="radiusanchorspace" value="$targetsector"/>
+          <param name="engageonsight" value="$attackonsight"/>
+          <param name="enforceradius" value="true"/>
+          <param name="list_objectstoignore" value="$objectstoignore"/>
+          <param name="internalorder" value="true"/>
+          <param name="debugchance" value="$debugchance"/>
+        </run_script>
+
+        <wait exact="500ms"/>
+      </do_while>
+
+      <label name="finish"/>
+    </actions>
+  </attention>
+</aiscript>
