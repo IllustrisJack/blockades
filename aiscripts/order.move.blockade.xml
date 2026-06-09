@@ -196,26 +196,33 @@
           </do_else>
 
           <!-- Clear stale default to break any prior dispatch from us. -->
-          <do_if value="@$LocSub.defaultorder.id == 'MoveWait' or @$LocSub.defaultorder.id == 'Blockade'">
+          <do_if value="@$LocSub.defaultorder.id == 'ProtectPosition'
+                        or @$LocSub.defaultorder.id == 'MoveWait'
+                        or @$LocSub.defaultorder.id == 'Blockade'">
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
 
-          <!-- Dispatch: persistent default (sub returns here after any vanilla
-               combat order ends) + immediate active that interrupts whatever
-               the sub was doing. Vanilla Coordinate Attack uses the same pattern
-               (create_order MoveWait immediate="true") for its position-and-hold step. -->
-          <create_order id="'MoveWait'" object="$LocSub" default="true">
+          <!-- Dispatch ProtectPosition (vanilla "defend this position" order).
+               attackonsight=true means subs proactively engage hostiles in range,
+               not just react to being shot — that's what gives us "engage anything
+               coming through the gate". enforceradius=true keeps subs anchored
+               to the slot area. Two creates: default=true persistent (sub returns
+               here after any combat resolves) + default=false immediate=true to
+               override the sub's existing escort/idle state. -->
+          <create_order id="'ProtectPosition'" object="$LocSub" default="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
-            <param name="lookat" value="$LocLookatPos"/>
-            <param name="timeout" value="0s"/>
-            <param name="recallsubordinates" value="false"/>
+            <param name="radius" value="$engagerange"/>
+            <param name="attackonsight" value="$attackonsight"/>
+            <param name="pursuetargets" value="$pursuetargets"/>
+            <param name="enforceradius" value="true"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
-          <create_order id="'MoveWait'" object="$LocSub" default="false" immediate="true">
+          <create_order id="'ProtectPosition'" object="$LocSub" default="false" immediate="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
-            <param name="lookat" value="$LocLookatPos"/>
-            <param name="timeout" value="0s"/>
-            <param name="recallsubordinates" value="false"/>
+            <param name="radius" value="$engagerange"/>
+            <param name="attackonsight" value="$attackonsight"/>
+            <param name="pursuetargets" value="$pursuetargets"/>
+            <param name="enforceradius" value="true"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
 
@@ -345,10 +352,10 @@
            cancel_order on $ship.defaultorder. -->
       <do_if value="this.assignedcontrolled.subordinates.count gt 0">
         <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-          <do_if value="@$LocSub.order.id == 'MoveWait'">
+          <do_if value="@$LocSub.order.id == 'ProtectPosition'">
             <cancel_order order="$LocSub.order"/>
           </do_if>
-          <do_if value="@$LocSub.defaultorder.id == 'MoveWait'">
+          <do_if value="@$LocSub.defaultorder.id == 'ProtectPosition'">
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
         </do_for_each>
