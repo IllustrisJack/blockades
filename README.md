@@ -21,15 +21,26 @@ Optional params (visible under "Advanced"):
 | Engagement Range | ship's radar range | Hostiles outside this are ignored. |
 | Pursue Targets | off | If on, ships leave formation to chase. |
 | Attack on Sight | on | If off, ships only react when attacked. |
+| Face Away From Gate | off | Reverse the formation's lookat. |
 | Side | auto | 0=auto (uses gate type), 1=destination-facing, -1=interior-facing. |
 | Formation Size | auto | Total ships in formation; auto-derives from your wing. |
 | Slot Index | auto | This ship's slot; auto-derives from position in wing. |
+| Timeout | 0s | 0 = infinite. |
 
-Solo ships sit directly in front of the gate. Wings of 2–7 ships use one inner ring (theta=30°); 8–13 add an outer ring (theta=60°); 14+ add a flat ring (theta=80°). All on the hostile-facing hemisphere.
+## Formation behavior
+
+- **Solo ship** sits in slot 0 directly in front of the gate (offset slightly perpendicular to the highway centerline so XL/L hulls don't fight transiting mass traffic).
+- **Wings** sort subordinates by class — L/XL fill the inner ring (θ=30°, closer to leader), then M, then S and others spill into the outer ring (θ=60°) and the flat ring (θ=80°) beyond that.
+- **Leader is bastion-style**: holds position at slot 0, doesn't chase. Its weapons are flipped to `weaponmode.attackenemies` for the duration so turrets fire at any hostile that wanders into range. Existing `missiledefence` and `mining` turret assignments are preserved. Original modes are restored when the blockade ends.
+- **Subordinates** hold their slot via vanilla `MoveWait`. When the leader's hold loop scans hostiles within engagerange of the gate (every ~10s), each sub gets dispatched to `AttackInRange` anchored at its own slot — engages everything in range, then falls back to slot.
+
+Drift / facing correction runs every iteration with `forceposition + forcerotation`, so the leader converges on exact slot and facing across iterations rather than parking "close enough."
+
+When the leader's order is replaced or cancelled, the cleanup pass cancels each sub's current order and default order — switching gates won't leave a sub drifting back to the previous slot.
 
 ## AI behavior
 
-Every 30 minutes (configurable in `md/blockade.xml`'s `Init`), the mod scans every active gate. For each gate where:
+Every 30 minutes (configurable in `md/blockade.xml`'s `VerifyVariables`), the mod scans every active gate. For each gate where:
 
 - the sector-side owner is at war with the destination-side owner, and
 - both factions are eligible (not Xenon/Khaak/civilian/player/etc.), and
@@ -45,17 +56,20 @@ Existing blockades are checked the same interval and disbanded when:
 - the war ended (relation > -0.1), or
 - all ships in the blockade are dead.
 
+When an AI blockade is established or disbanded, a player logbook entry is written under the **News** category (gated by `$NewsEnabled`, default on). Uses vanilla `add_player_log` — no dependency on any external news framework.
+
 ## Configuration
 
 Tunables live in `md/blockade.xml` under the `VerifyVariables` cue:
 
 ```
-$Enable               master toggle
+$Enable               master toggle                    (true)
 $ScanIntervalMin      minutes between scans            (30)
 $MinFleetCapital      destroyers per blockade          (1)
 $MinFleetEscort       frigates per blockade            (3)
 $MinFleetFighter      fighters per blockade            (4)
 $BlockadeDistance     order's distance param           (6km)
+$NewsEnabled          player logbook entries           (true)
 $DebugDetailed        per-event debug_text             (false)
 $ExcludedFactions     list of factions to skip
 ```
@@ -75,10 +89,14 @@ blockades/
 ├── content.xml
 ├── aiscripts/
 │   └── order.move.blockade.xml      the order definition + behavior loop
+├── libraries/
+│   └── icons.xml                    map icon alias
 ├── md/
 │   └── blockade.xml                 AI auto-blockade scan + dispatch
 ├── t/
 │   └── 0001.xml                     localization (page 20810)
+├── scripts/
+│   └── publish.ps1                  Steam Workshop publish helper
 └── README.md
 ```
 
@@ -86,7 +104,8 @@ No vanilla files are diffed. The mod is pure additions, so it doesn't conflict w
 
 ## Compatibility
 
-- X4 9.0+. The order delegates to vanilla's `move.generic` and `move.seekenemies` aiscripts for path-finding and engagement, so it inherits vanilla combat behavior changes automatically.
+- X4 9.0+. The order delegates to vanilla `move.generic` for pathing/positioning and dispatches vanilla `AttackInRange` for sub engagement, so combat behavior tracks vanilla changes automatically.
+- Leader weapon-mode override uses vanilla `lib.set.weaponmode` and restores the prior modes on finish/abort — uninstalling the mod after a blockade ended is clean. Uninstalling **during** an active blockade will leave the leader's weapons on `attackenemies` until the player resets the mode manually.
 - All Egosoft DLCs supported (split, terran, pirate, boron, timelines).
 - Save-safe: the mod stores state under `md.$BBVarTable` and re-initializes missing keys on load.
 - Removing the mod mid-save will leave any spawned ships with an invalid order; they fall back to the previous default behavior.
