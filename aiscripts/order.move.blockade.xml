@@ -308,11 +308,14 @@
                        x="$slotx" y="$sloty" z="$slotz"
                        object="$target"/>
 
-      <!-- Slot-arrival tolerance scaled by ship size; XL hulls can't realistically
-           settle within 500m. Hysteresis: enter at-slot at $arrivaltol, exit at
-           $exittol so the leader doesn't ping-pong between in-transit and at-slot
-           on the edge of the threshold. -->
-      <set_value name="$arrivaltol" exact="[500m, this.ship.size * 2.0f].max"/>
+      <!-- Slot-arrival tolerance scaled by ship size. move.generic with
+           playerprecise=true still picks a safepos near $slotpos (not the
+           exact point) so $arrivaltol has to be lenient enough to count
+           that safepos as "arrived" — otherwise the in-transit branch
+           re-fires move.generic, lands at the same safepos again,
+           re-fires, etc. Hysteresis: enter at-slot at $arrivaltol, only
+           exit when knocked beyond $exittol. -->
+      <set_value name="$arrivaltol" exact="[1.5km, this.ship.size * 3.0f].max"/>
       <set_value name="$exittol" exact="$arrivaltol * 2.0f"/>
 
       <debug_text text="'Blockade: gate %s, slot %s/%s (size=%sm, effd=%sm, arrivaltol=%sm), theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, this.ship.size, $effdistance, $arrivaltol, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
@@ -416,30 +419,6 @@
               </do_if>
             </do_for_each>
             <remove_value name="$LocRallyPos"/>
-
-            <!-- XL/L leader main-weapon engagement. S/M ships engage
-                 fully via vanilla turret-mode attackenemies (already set
-                 in init) — only XL/L have the forward-mounted main
-                 batteries that don't auto-fire without an Attack-style
-                 order. Dispatch AttackInRange on the LEADER with tight
-                 radius=$arrivaltol so the ship stays in slot (vanilla
-                 enforceradius mechanic) while engaging everything in
-                 weapon range. immediate=true preempts our Blockade order;
-                 AttackInRange runs combat, then control returns to this
-                 loop. We gate on at-slot ($wasintransit=false) so the
-                 leader doesn't get pulled into combat before it's at its
-                 station — and gate on having moved to slot at least once
-                 ($synced=true) for the same reason. -->
-            <do_if value="(this.ship.isclass.ship_l or this.ship.isclass.ship_xl) and (not $wasintransit) and $synced">
-              <debug_text text="'Blockade: leader (L/XL) engaging hostile %s from slot.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
-              <create_order id="'AttackInRange'" object="this.assignedcontrolled" immediate="true">
-                <param name="destination" value="[$targetsector, $slotpos]"/>
-                <param name="radius" value="$arrivaltol"/>
-                <param name="pursuetargets" value="false"/>
-                <param name="enforceradius" value="true"/>
-                <param name="debugchance" value="$debugchance"/>
-              </create_order>
-            </do_if>
           </do_if>
         </do_if>
 
@@ -495,10 +474,17 @@
           <do_else>
             <create_position name="$LocLeaderLookat" space="$targetsector" object="$target"/>
           </do_else>
+          <!-- playerprecise=true: skips position randomization (so re-runs
+               land on the same safepos every time) but keeps safepos
+               selection so we don't fight pathing the way precise=true
+               did. Without this, each iteration's move.generic picks a
+               different randomized point near slot and the leader
+               oscillates between them forever. -->
           <run_script name="'move.generic'" result="$movesuccess">
             <param name="destination" value="$targetsector"/>
             <param name="position" value="$slotpos"/>
             <param name="lookat" value="$LocLeaderLookat"/>
+            <param name="playerprecise" value="true"/>
             <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </run_script>
