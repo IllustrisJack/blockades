@@ -391,22 +391,24 @@
           </do_if>
         </do_if>
 
-        <!-- Drift / polish correction. Tighter threshold than the initial
-             move so the leader converges on slot+facing across iterations.
-             forceposition="true" + no endintargetzone makes move.generic
-             aim for the exact point rather than "any zone with the gate". -->
+        <!-- Polish every iteration. forceposition + forcerotation makes
+             move.generic converge on the exact point AND keep refining
+             facing — when the ship is already at slot, this becomes a
+             rotation-only correction (no thrust spent on translation).
+             flyingto command label only when actually translating;
+             otherwise stay on standingby so the UI doesn't blink. -->
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
         <do_if value="$slotdist gt (this.ship.size + 1km)">
           <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-          <run_script name="'move.generic'" result="$movesuccess">
-            <param name="destination" value="$targetsector"/>
-            <param name="position" value="$slotpos"/>
-            <param name="forceposition" value="true"/>
-            <param name="forcerotation" value="true"/>
-            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
-            <param name="debugchance" value="$debugchance"/>
-          </run_script>
         </do_if>
+        <run_script name="'move.generic'" result="$movesuccess">
+          <param name="destination" value="$targetsector"/>
+          <param name="position" value="$slotpos"/>
+          <param name="forceposition" value="true"/>
+          <param name="forcerotation" value="true"/>
+          <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+          <param name="debugchance" value="$debugchance"/>
+        </run_script>
 
         <set_command_action commandaction="commandaction.standingby"/>
         <wait min="5s" max="10s"/>
