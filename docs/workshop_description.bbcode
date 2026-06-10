@@ -1,0 +1,58 @@
+[h1]Blockades[/h1]
+Adds a [b]Blockade[/b] default behavior. Ships hold a hemisphere formation on the hostile side of a target gate and engage transiting hostiles. AI factions at war auto-deploy blockade fleets at gates leading from enemy claimspace into their own.
+
+Built for X4: Foundations 9.0. Pure additions — no vanilla files modified, compatible with everything.
+
+[h2]Player usage[/h2]
+[olist]
+[*]Select a ship or wing.
+[*]Open the Behavior dropdown.
+[*]Pick [b]Blockade[/b].
+[*]Choose a gate as the target.
+[/olist]
+
+The leader sits at slot 0 in front of the gate (offset slightly above the highway centerline so XL/L ships don't fight transiting mass traffic). Subordinates fill an inner ring (theta=30°) closer to the gate, an outer ring (60°) further out, and a flat ring (80°) beyond. Ships are sorted by class — L/XL inner, M middle, S/lighter outer — so capitals anchor and fast hulls intercept.
+
+When any enemy ship enters [b]Engagement Range[/b] of the gate (or the leader), all subordinates dispatch to engage. After the area clears they fall back to their slots. The leader is bastion-style: holds position, fires its turrets at anything in range.
+
+[h2]Order parameters[/h2]
+[list]
+[*][b]Distance from Gate[/b] (default 6 km) — radius of the formation sphere.
+[*][b]Engagement Range[/b] (default ship's radar range) — hostiles outside this are ignored.
+[*][b]Pursue Targets[/b] (advanced) — if on, ships chase beyond the formation.
+[*][b]Face Away From Gate[/b] — reverse the formation's lookat for sector-side blockades.
+[*][b]Side[/b] (auto) — 0 picks side from gate type; 1 = destination-facing; -1 = interior-facing.
+[*][b]Timeout[/b] (default 0 = infinite).
+[/list]
+
+[h2]AI auto-blockade[/h2]
+Every 30 minutes (configurable), the mod scans every active gate. Where:
+[list]
+[*]the sector-side owner is at war with the destination-side owner,
+[*]both factions are eligible (no Xenon, Khaak, civilians, etc.),
+[*]the defender has at least one shipyard, and
+[*]no blockade already covers the gate,
+[/list]
+…a fleet (1 destroyer + 3 frigates + 4 fighters by default, race-matched) is spawned at the defender's nearest shipyard and dispatched to the gate in formation. A player logbook entry is written under the News category. Blockades disband automatically when the war ends, the defender retakes the destination sector, the gate is destroyed, or all ships in the fleet are lost.
+
+[h2]Tunables[/h2]
+Edit [code]md/blockade.xml[/code] → [code]VerifyVariables[/code], or via in-game debug console:
+[code]
+md.Blockade.$BBVarTable.$Enable = false
+md.Blockade.$BBVarTable.$MinFleetCapital = 2
+[/code]
+
+[h2]Compatibility[/h2]
+[list]
+[*][b]X4 9.0+[/b]
+[*]All Egosoft DLCs supported.
+[*][b]No vanilla diffs[/b] — order definition is a new file, no xpath patches.
+[*]Removing the mod mid-save leaves spawned ships with an invalid order; they fall back to their previous default behavior.
+[/list]
+
+[h2]Source, issues, and license[/h2]
+[list]
+[*]GitHub: [url=https://github.com/IllustrisJack/blockades]IllustrisJack/blockades[/url]
+[*]License: [b]Dual MIT / Apache-2.0[/b], at your option.
+[/list]
+Bug reports and PRs welcome.
