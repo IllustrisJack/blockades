@@ -151,8 +151,6 @@
 
 						<set_value name="$Sector" exact="$Gate.sector"/>
 						<set_value name="$Ships" exact="[]"/>
-						<set_value name="$TotalShips" exact="$BBVT.$MinFleetCapital + $BBVT.$MinFleetEscort + $BBVT.$MinFleetFighter"/>
-						<set_value name="$SpawnIdx" exact="0"/>
 
 						<!-- Pick race-appropriate macros up front. -->
 						<set_value name="$Race" exact="$Defender.primaryrace"/>
@@ -195,29 +193,109 @@
 							<set_value name="$MacroS" exact="macro.ship_arg_s_heavyfighter_01_a_macro"/>
 						</do_else>
 
-						<!-- Capital ships -->
-						<set_value name="$Counter" exact="0"/>
-						<do_while value="$Counter lt $BBVT.$MinFleetCapital">
-							<set_value name="$CurrentMacro" exact="$MacroL"/>
-							<include_actions ref="LibrarySpawnOne"/>
-							<set_value name="$Counter" operation="add" exact="1"/>
-						</do_while>
+						<!-- Wing model (matches the player-led flow): pick a leader,
+						     spawn the rest as its subordinates, then give the leader
+						     the Blockade order. The leader's init in
+						     aiscripts/order.move.blockade.xml sees subordinates.count
+						     gt 0 and dispatches MoveWait to each sub at its slot.
+						     Same code path as a player-built wing.
 
-						<!-- Escort frigates / corvettes -->
-						<set_value name="$Counter" exact="0"/>
-						<do_while value="$Counter lt $BBVT.$MinFleetEscort">
-							<set_value name="$CurrentMacro" exact="$MacroM"/>
-							<include_actions ref="LibrarySpawnOne"/>
-							<set_value name="$Counter" operation="add" exact="1"/>
-						</do_while>
+						     Leader preference: L destroyer > M frigate > S fighter,
+						     gated by which counts are configured > 0. Decrement the
+						     remaining-of-that-class counter so we don't overshoot. -->
+						<set_value name="$LeaderMacro" exact="null"/>
+						<set_value name="$RemainCapital" exact="$BBVT.$MinFleetCapital"/>
+						<set_value name="$RemainEscort" exact="$BBVT.$MinFleetEscort"/>
+						<set_value name="$RemainFighter" exact="$BBVT.$MinFleetFighter"/>
+						<do_if value="$RemainCapital gt 0 and $MacroL != null">
+							<set_value name="$LeaderMacro" exact="$MacroL"/>
+							<set_value name="$RemainCapital" operation="subtract" exact="1"/>
+						</do_if>
+						<do_elseif value="$RemainEscort gt 0 and $MacroM != null">
+							<set_value name="$LeaderMacro" exact="$MacroM"/>
+							<set_value name="$RemainEscort" operation="subtract" exact="1"/>
+						</do_elseif>
+						<do_elseif value="$RemainFighter gt 0 and $MacroS != null">
+							<set_value name="$LeaderMacro" exact="$MacroS"/>
+							<set_value name="$RemainFighter" operation="subtract" exact="1"/>
+						</do_elseif>
 
-						<!-- Fighter screen -->
-						<set_value name="$Counter" exact="0"/>
-						<do_while value="$Counter lt $BBVT.$MinFleetFighter">
-							<set_value name="$CurrentMacro" exact="$MacroS"/>
-							<include_actions ref="LibrarySpawnOne"/>
-							<set_value name="$Counter" operation="add" exact="1"/>
-						</do_while>
+						<do_if value="$LeaderMacro == null">
+							<do_if value="$BBVT.$DebugDetailed">
+								<debug_text text="'BB: dispatch aborted at %s — no suitable leader macro for race %s with configured counts.'.[$Gate.knownname, $Race]" filter="general"/>
+							</do_if>
+						</do_if>
+						<do_else>
+							<!-- Spawn leader first so we have a commander reference. -->
+							<create_ship name="$LocLeader" macro="$LeaderMacro" sector="$BBLocShipyard.sector">
+								<owner exact="$Defender"/>
+								<position object="$BBLocShipyard" max="5km"/>
+							</create_ship>
+
+							<do_if value="$LocLeader">
+								<append_to_list name="$Ships" exact="$LocLeader"/>
+
+								<!-- Spawn remaining capitals as subordinates. Subgroup
+								     1 holds capitals/escorts, 2 holds fighters — keeps
+								     the wing display tidy. -->
+								<set_value name="$Counter" exact="0"/>
+								<do_while value="$Counter lt $RemainCapital">
+									<create_ship name="$LocShip" macro="$MacroL" sector="$BBLocShipyard.sector">
+										<owner exact="$Defender"/>
+										<position object="$BBLocShipyard" max="5km"/>
+									</create_ship>
+									<do_if value="$LocShip">
+										<set_object_commander object="$LocShip" commander="$LocLeader" subordinategroupid="1"/>
+										<append_to_list name="$Ships" exact="$LocShip"/>
+									</do_if>
+									<remove_value name="$LocShip"/>
+									<set_value name="$Counter" operation="add" exact="1"/>
+								</do_while>
+
+								<!-- Escort frigates / corvettes. Same subgroup 1. -->
+								<set_value name="$Counter" exact="0"/>
+								<do_while value="$Counter lt $RemainEscort">
+									<create_ship name="$LocShip" macro="$MacroM" sector="$BBLocShipyard.sector">
+										<owner exact="$Defender"/>
+										<position object="$BBLocShipyard" max="5km"/>
+									</create_ship>
+									<do_if value="$LocShip">
+										<set_object_commander object="$LocShip" commander="$LocLeader" subordinategroupid="1"/>
+										<append_to_list name="$Ships" exact="$LocShip"/>
+									</do_if>
+									<remove_value name="$LocShip"/>
+									<set_value name="$Counter" operation="add" exact="1"/>
+								</do_while>
+
+								<!-- Fighter screen. Subgroup 2 keeps them visually
+								     separated from the capitals in the player's
+								     properties UI when they look at a friendly wing. -->
+								<set_value name="$Counter" exact="0"/>
+								<do_while value="$Counter lt $RemainFighter">
+									<create_ship name="$LocShip" macro="$MacroS" sector="$BBLocShipyard.sector">
+										<owner exact="$Defender"/>
+										<position object="$BBLocShipyard" max="5km"/>
+									</create_ship>
+									<do_if value="$LocShip">
+										<set_object_commander object="$LocShip" commander="$LocLeader" subordinategroupid="2"/>
+										<append_to_list name="$Ships" exact="$LocShip"/>
+									</do_if>
+									<remove_value name="$LocShip"/>
+									<set_value name="$Counter" operation="add" exact="1"/>
+								</do_while>
+
+								<!-- Now (and only now, after all subs are attached) give
+								     the leader the Blockade order. Its init enumerates
+								     this.assignedcontrolled.subordinates, class-sorts
+								     them, and dispatches MoveWait to each with its
+								     own slot index. -->
+								<create_order id="'Blockade'" object="$LocLeader" default="true">
+									<param name="target" value="$Gate"/>
+									<param name="distance" value="$BBVT.$BlockadeDistance"/>
+								</create_order>
+							</do_if>
+							<remove_value name="$LocLeader"/>
+						</do_else>
 
 						<set_value name="$BBVT.$ActiveBlockades.{$Gate}" exact="table[
 							$Faction = $Defender,
@@ -245,27 +323,6 @@
 			</actions>
 		</cue>
 
-		<library name="LibrarySpawnOne" purpose="include_actions" comment="Spawn one ship of $CurrentMacro at $BBLocShipyard for $Defender. Appends to $Ships and dispatches Blockade with the next sequential slot in $SpawnIdx. Called via &lt;include_actions&gt; — purpose='run_actions' would require &lt;run_actions&gt; with a result, which we don't need here.">
-			<actions>
-				<do_if value="$CurrentMacro != null">
-					<create_ship name="$LocShip" macro="$CurrentMacro" sector="$BBLocShipyard.sector">
-						<owner exact="$Defender"/>
-						<position object="$BBLocShipyard" max="5km"/>
-					</create_ship>
-					<do_if value="$LocShip">
-						<append_to_list name="$Ships" exact="$LocShip"/>
-						<create_order id="'Blockade'" object="$LocShip" default="true">
-							<param name="target" value="$Gate"/>
-							<param name="distance" value="$BBVT.$BlockadeDistance"/>
-							<param name="formationsize" value="$TotalShips"/>
-							<param name="slotindex" value="$SpawnIdx"/>
-						</create_order>
-					</do_if>
-					<remove_value name="$LocShip"/>
-				</do_if>
-				<set_value name="$SpawnIdx" operation="add" exact="1"/>
-			</actions>
-		</library>
 
 		<cue name="EventBlockadeMaintenance" instantiate="true">
 			<conditions>
