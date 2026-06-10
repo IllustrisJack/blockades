@@ -62,11 +62,22 @@
     </handler>
   </interrupts>
   <init>
-    <!-- command.blockade doesn't exist in the engine enum (hardcoded list, not
-         mod-extendable). command.protect with the gate as param gives the closest
-         vanilla feel — UI shows "Protect [gate name]" rather than the generic
-         "Patrolling" label. Same pattern vanilla uses for protect.ship/station. -->
-    <set_command command="command.protect" param="$target"/>
+    <!-- command.blockade doesn't exist in the engine enum (hardcoded list,
+         not mod-extendable). command.protect with the gate's destination
+         sector as the param shows "Beschütze <hostile sector>" /
+         "Protecting <hostile sector>" — the actual destination name
+         rather than the generic gate knownname ("Sprunggate" for every
+         gate in the game, useless to the player). Slightly off
+         semantically (the ship is blockading the gate FROM that sector,
+         not protecting it) but the destination name is the only useful
+         per-ship signal in the UI. Fall back to the gate itself if the
+         destination chain is null (gate destroyed mid-order). -->
+    <do_if value="@$target.destination.sector">
+      <set_command command="command.protect" param="$target.destination.sector"/>
+    </do_if>
+    <do_else>
+      <set_command command="command.protect" param="$target"/>
+    </do_else>
 
     <!-- Auto-pick target gate when none was passed in (job-spawned ships
          can't bake a specific gate into the job XML; vanilla job <order>
