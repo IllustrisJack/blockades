@@ -451,21 +451,36 @@
         </do_elseif>
 
         <do_if value="$wasintransit">
-          <!-- In-transit: use move.generic with precise=true. <move_to>
-               doesn't pathfind cross-sector and was too loose in-sector
-               (leader stopping km away from slot). move.generic blocks
-               this script until arrival, so scan won't fire during the
-               transit — subs still react via vanilla MoveWait's built-in
-               InterruptAttack on their own slots. After arrival, the
-               at-slot branch takes over and scan fires every iteration. -->
+          <!-- In-transit: use move.generic exactly the way vanilla MoveWait
+               does for subordinates — same script, same param shape, same
+               precise=default (false). Earlier we had precise=true which
+               skips safepos and tries to nail the exact point; for XL
+               hulls near a gate that fights pathing and the ship stops
+               kilometres away from slot. Drop it and let move.generic
+               pick a safepos near $slotpos. After move.generic returns,
+               stop_moving + stop_boost matches the MoveWait cleanup.
+
+               lookat is a fresh position object created in $targetsector
+               relative to the gate (or relative to the ship's current
+               position for $lookaway), mirroring how the sub dispatch
+               builds $LocLookatPos. move.generic handles the rotation
+               to lookat on arrival. -->
+          <do_if value="$lookaway">
+            <create_position name="$LocLeaderLookat" space="$targetsector" object="this.ship"/>
+          </do_if>
+          <do_else>
+            <create_position name="$LocLeaderLookat" space="$targetsector" object="$target"/>
+          </do_else>
           <run_script name="'move.generic'" result="$movesuccess">
             <param name="destination" value="$targetsector"/>
             <param name="position" value="$slotpos"/>
-            <param name="precise" value="true"/>
-            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+            <param name="lookat" value="$LocLeaderLookat"/>
+            <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </run_script>
           <stop_moving object="this.ship"/>
+          <stop_boost object="this.ship"/>
+          <remove_value name="$LocLeaderLookat"/>
         </do_if>
         <do_else>
           <!-- At-slot: rotate-in-place. forceposition=true with current
