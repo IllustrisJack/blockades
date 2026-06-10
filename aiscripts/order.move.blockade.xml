@@ -391,15 +391,18 @@
           </do_if>
         </do_if>
 
-        <!-- Drift correction. Only run if no engagement just dispatched —
-             scan above already takes priority. Tolerance: ship size + 3km. -->
+        <!-- Drift / polish correction. Tighter threshold than the initial
+             move so the leader converges on slot+facing across iterations.
+             forceposition="true" + no endintargetzone makes move.generic
+             aim for the exact point rather than "any zone with the gate". -->
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt (this.ship.size + 3km)">
+        <do_if value="$slotdist gt (this.ship.size + 1km)">
           <set_command_action commandaction="commandaction.flyingto" param="$target"/>
           <run_script name="'move.generic'" result="$movesuccess">
             <param name="destination" value="$targetsector"/>
             <param name="position" value="$slotpos"/>
-            <param name="endintargetzone" value="true"/>
+            <param name="forceposition" value="true"/>
+            <param name="forcerotation" value="true"/>
             <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
             <param name="debugchance" value="$debugchance"/>
           </run_script>
