@@ -1,53 +1,55 @@
 [h1]Blockades[/h1]
-Adds a [b]Blockade[/b] default behavior. Ships hold a hemisphere formation on the hostile side of a target gate and engage transiting hostiles. AI factions at war auto-deploy blockade fleets at gates leading from enemy claimspace into their own.
+Adds a [b]Blockade[/b] default behavior for your fleet, plus an AI system that has the major races set up their own blockades at hostile-facing gates in their territory. Built for X4: Foundations 9.0. No vanilla files modified — drops in next to anything.
 
-Built for X4: Foundations 9.0. Pure additions — no vanilla files modified, compatible with everything.
-
-[b]⚠ Work-in-progress.[/b] Player-led blockades and the AI auto-deploy flow are stable in short play sessions; long-running balance, edge cases (sub re-targeting after gate switches, behavior across sector handoffs), and very large fleets still need testing in the wild. [b]Please report bugs[/b] — log snippets help most. See [b]Source, issues, and license[/b] below for where to file.
+[b]⚠ Work-in-progress.[/b] Player blockades and the AI auto-deploy flow are stable in short play sessions; long-running balance, edge cases (sub re-targeting after a gate switches owner, behavior across sector handoffs), and very large wings still need testing in the wild. [b]Please report bugs[/b] — log snippets help most. See [b]Source, issues, and license[/b] below.
 
 [h2]Player usage[/h2]
 [olist]
 [*]Select a ship or wing.
-[*]Open the Behavior dropdown.
+[*]Open the [b]Behavior[/b] dropdown.
 [*]Pick [b]Blockade[/b].
 [*]Choose a gate as the target.
 [/olist]
 
-The leader sits at slot 0 in front of the gate (offset slightly above the highway centerline so XL/L ships don't fight transiting mass traffic). Subordinates fill an inner ring (theta=30°) closer to the gate, an outer ring (60°) further out, and a flat ring (80°) beyond. Ships are sorted by class — L/XL inner, M middle, S/lighter outer — so capitals anchor and fast hulls intercept.
+The wing leader sits in front of the gate (offset slightly above the highway centerline so capital hulls don't fight mass-traffic). Subordinates fan out in a hemisphere on the hostile side, class-sorted: L/XL ships fill the inner ring closer to the leader, M and S spill out to the middle and outer rings. Capitals anchor, fast hulls intercept.
 
-When any enemy ship enters [b]Engagement Range[/b] of the gate (or the leader), all subordinates dispatch to engage. After the area clears they fall back to their slots. The leader is bastion-style: holds position, fires its turrets at anything in range. L/XL forward main batteries don't auto-fire under the Blockade order (vanilla X4 limitation) — turrets handle leader-side engagement.
+When an enemy ship enters [b]Engagement Range[/b] of the gate (or the leader), all subordinates dispatch to engage. After the area clears they fall back to their slots. The leader is bastion-style: holds position, turrets fire at anything in range.
 
-[h2]Recommended leader[/h2]
-Use an [b]L (destroyer)[/b] or [b]M (frigate / corvette)[/b] as the wing leader. [b]XL pathfinding currently has issues[/b] — XL hulls work fine as subordinates.
+[h2]Recommended fleet leader[/h2]
+Use an [b]L (destroyer)[/b] or [b]M (frigate / corvette)[/b] as the wing leader. [b]XL pathfinding currently has issues[/b] — XL hulls work fine as subordinates, just not as the leader. [b]Note for L/XL flagships:[/b] forward main batteries don't fire automatically (vanilla X4 limit — those weapons need an Attack-style order context). Turrets handle leader-side engagement.
 
 [h2]Order parameters[/h2]
 [list]
 [*][b]Distance from Gate[/b] (default 6 km) — radius of the formation sphere.
 [*][b]Engagement Range[/b] (default ship's radar range) — hostiles outside this are ignored.
-[*][b]Pursue Targets[/b] (advanced) — if on, ships chase beyond the formation.
-[*][b]Face Away From Gate[/b] — reverse the formation's lookat for sector-side blockades.
-[*][b]Side[/b] (auto) — 0 picks side from gate type; 1 = destination-facing; -1 = interior-facing.
+[*][b]Pursue Targets[/b] (advanced) — if on, ships chase beyond the formation. Off by default.
+[*][b]Face Away From Gate[/b] — reverse formation orientation; useful for sector-side blockades.
+[*][b]Side[/b] (auto) — 0 picks the side from gate type; 1 = destination-facing; -1 = interior-facing.
 [*][b]Timeout[/b] (default 0 = infinite).
 [/list]
 
 [h2]AI auto-blockade[/h2]
-Deployment is handled by X4's [b]job system[/b]. The mod adds per-race blockade jobs (Argon, Paranid, Teladi, Split, Terran, Boron): one [b]L destroyer leader[/b] running the Blockade order, with 3 M frigate / corvette subordinates and 4 S heavy-fighter subordinates per wing. The faction's own economy queues these at its shipyards over real time, respecting build queues and resources — no instant spawning.
+Deployment is handled by X4's [b]job system[/b], not script-spawning. The mod adds per-race blockade jobs for [b]Argon, Paranid, Teladi, Split, Terran, Boron[/b]: an L destroyer leader with 3 M frigate/corvette and 4 S heavy-fighter subordinates per wing. Faction shipyards queue and build these over real time, respecting wares and build slots.
 
-Quotas: up to 6 blockade fleets per faction galaxy-wide, max 1 per cluster.
+Quotas: up to [b]6 blockade fleets per faction galaxy-wide, max 1 per cluster[/b].
 
-When a blockade-leader spawns and has no explicit gate target, it [b]auto-picks[/b] one from its current sector — the first active gate whose destination owner is actively hostile (relation ≤ -0.25 and engine flags them as may-attack). The ship then flies its escorts to the hemisphere formation around that gate. When the hostile relationship ends (relation thaws, gate destroyed, owner flips), the order finishes naturally and the job system decides on its next tick whether to queue a replacement based on the current claimspace state.
+Each spawned leader picks its own hostile-facing gate in its sector and flies the wing into formation. When the hostile relationship ends (relation thaws, gate destroyed, sector changes hands), the order finishes naturally and the job system decides whether to queue a replacement.
+
+[b]Plans are to refine, expand and balance the AI behaviour over time. Let me know what ideas you have![/b]
 
 [h2]Compatibility[/h2]
 [list]
-[*][b]X4 9.0+[/b]
-[*]All Egosoft DLCs supported.
-[*][b]No vanilla diffs[/b] — order definition is a new file, no xpath patches.
-[*]Removing the mod mid-save leaves spawned ships with an invalid order; they fall back to their previous default behavior.
+[*][b]X4 9.0[/b] required. Older versions are not supported.
+[*]All Egosoft DLCs supported (Split, Terran, Pirate, Boron, Timelines).
+[*][b]No vanilla diffs[/b] — additive patches only, no replacement of vanilla files. Conflicts with other mods are highly unlikely.
 [/list]
+
+[h2]Save-game safety[/h2]
+The mod stores state under its own variable namespace; removing it mid-save leaves any spawned blockade ships with an invalid order — they fall back to their previous default behavior and stay in the world. No persistent locks or flags survive uninstall.
 
 [h2]Source, issues, and license[/h2]
 [list]
 [*]GitHub: [url=https://github.com/IllustrisJack/blockades]IllustrisJack/blockades[/url]
 [*]License: [b]Dual MIT / Apache-2.0[/b], at your option.
 [/list]
-Bug reports and PRs welcome.
+Bug reports and PRs welcome on GitHub.
