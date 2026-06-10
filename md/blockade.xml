@@ -71,6 +71,9 @@
 				<do_if value="not $BBVT.$DebugDetailed?">
 					<set_value name="$BBVT.$DebugDetailed" exact="false"/>
 				</do_if>
+				<do_if value="not $BBVT.$NewsEnabled?">
+					<set_value name="$BBVT.$NewsEnabled" exact="true"/>
+				</do_if>
 				<do_if value="(not $BBVT.$ActiveBlockades?) or ($BBVT.$ActiveBlockades == null)">
 					<set_value name="$BBVT.$ActiveBlockades" exact="table[]"/>
 				</do_if>
@@ -225,6 +228,13 @@
 							$LastCheckedAt = player.age
 						]"/>
 
+						<do_if value="$BBVT.$NewsEnabled and ($Ships.count gt 0)">
+							<add_player_log title="{20810, 100}"
+							                text="{20810, 400}.[$Defender.name, $Gate.knownname, $Sector.knownname]"
+							                faction="$Defender"
+							                category="news"/>
+						</do_if>
+
 						<do_if value="$BBVT.$DebugDetailed">
 							<debug_text text="'BB: %s established blockade at %s (%s ships).'.[$Defender.name, $Gate.knownname, $Ships.count]" filter="general"/>
 						</do_if>
@@ -292,6 +302,12 @@
 					</do_if>
 
 					<do_if value="$ShouldDisband">
+						<do_if value="$BBVT.$NewsEnabled and $Gate.exists">
+							<add_player_log title="{20810, 100}"
+							                text="{20810, 401}.[$Gate.knownname]"
+							                faction="$Defender"
+							                category="news"/>
+						</do_if>
 						<do_if value="$BBVT.$DebugDetailed">
 							<debug_text text="'BB: disbanding blockade at %s.'.[@$Gate.knownname]" filter="general"/>
 						</do_if>
