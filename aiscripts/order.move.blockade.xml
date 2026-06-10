@@ -195,9 +195,23 @@
             <create_position name="$LocLookatPos" space="$targetsector" object="$target"/>
           </do_else>
 
-          <!-- Clear stale default to break any prior dispatch from us. -->
+          <!-- Clear stale orders from any prior dispatch. Must cancel BOTH
+               the current active AND the default — otherwise:
+                 - old active still queues behind our new immediate one and
+                   the sub flies new-slot → old-slot once arrival completes
+                 - old default is what the sub falls back to after the new
+                   active finishes, dragging it to the previous gate
+               Cover MoveWait/ProtectPosition/AttackInRange/Blockade so
+               retargeting works regardless of which mode we were in. -->
+          <do_if value="@$LocSub.order.id == 'MoveWait'
+                        or @$LocSub.order.id == 'ProtectPosition'
+                        or @$LocSub.order.id == 'AttackInRange'
+                        or @$LocSub.order.id == 'Blockade'">
+            <cancel_order order="$LocSub.order"/>
+          </do_if>
           <do_if value="@$LocSub.defaultorder.id == 'MoveWait'
                         or @$LocSub.defaultorder.id == 'ProtectPosition'
+                        or @$LocSub.defaultorder.id == 'AttackInRange'
                         or @$LocSub.defaultorder.id == 'Blockade'">
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
@@ -208,10 +222,13 @@
                the leader's hold loop below, which scans and dispatches
                AttackInRange to subs when hostiles enter the gate area; subs
                engage, then fall back to MoveWait default and return to slot. -->
+          <!-- default="true" MoveWait does NOT accept the timeout param —
+               engine throws "Timeout parameter 'timeout' was not expected for
+               default order" and the whole order spams errors. Only the active
+               variant below takes timeout. -->
           <create_order id="'MoveWait'" object="$LocSub" default="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
             <param name="lookat" value="$LocLookatPos"/>
-            <param name="timeout" value="0s"/>
             <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
@@ -293,10 +310,12 @@
 
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
 
-      <!-- Initial fly-to-slot via move.generic. Always run, regardless of sector —
-           leader was probably already in the gate's sector but at the wrong
-           position, and the old "only move if cross-sector" branch left them
-           sitting in place. move.generic handles pathing, safe-pos, lookat. -->
+      <!-- Initial fly-to-slot via move.generic. Don't retry-loop on failure —
+           that traps the leader (especially XL/L) outside the hold loop, so the
+           scan that dispatches subs to engage never fires. Just kick off the
+           initial move and fall through; the hold loop below has its own drift
+           correction that will keep trying, and the scan runs every iteration
+           regardless. -->
       <run_script name="'move.generic'" result="$movesuccess">
         <param name="destination" value="$targetsector"/>
         <param name="position" value="$slotpos"/>
@@ -305,9 +324,7 @@
         <param name="debugchance" value="$debugchance"/>
       </run_script>
       <do_if value="not $movesuccess">
-        <debug_text text="'Blockade: unable to reach slot in %s.'.[$targetsector.knownname]" chance="$debugchance"/>
-        <wait min="30s" max="60s"/>
-        <resume label="start"/>
+        <debug_text text="'Blockade: initial move did not complete cleanly in %s; entering hold loop anyway.'.[$targetsector.knownname]" chance="$debugchance"/>
       </do_if>
 
       <set_order_syncpoint_reached order="this.ship.order"/>
@@ -328,22 +345,12 @@
           <resume label="finish"/>
         </do_if>
 
-        <!-- Drift correction. -->
-        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt (this.ship.size + 3km)">
-          <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-          <run_script name="'move.generic'" result="$movesuccess">
-            <param name="destination" value="$targetsector"/>
-            <param name="position" value="$slotpos"/>
-            <param name="endintargetzone" value="true"/>
-            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
-            <param name="debugchance" value="$debugchance"/>
-          </run_script>
-        </do_if>
-
-        <!-- Proactive engagement: scan for ANY enemy ship near the gate. If
-             found, dispatch AttackInRange to each sub. Subs engage everything
-             in range of their own slot, then fall back to MoveWait. -->
+        <!-- Scan FIRST every iteration. Runs unconditionally, even before drift
+             correction — that way subs engage as soon as a hostile appears,
+             regardless of whether the leader has reached its slot yet (XL/L
+             ships can take a while). Scan is against the gate's sector with a
+             radius around the gate itself, anchored at the sub's own slot for
+             positional discipline. -->
         <do_if value="this.assignedcontrolled.subordinates.count gt 0">
           <find_object name="$LocBlockadeHostile"
                        object="$target"
@@ -370,8 +377,22 @@
           </do_if>
         </do_if>
 
+        <!-- Drift correction. Only run if no engagement just dispatched —
+             scan above already takes priority. Tolerance: ship size + 3km. -->
+        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+        <do_if value="$slotdist gt (this.ship.size + 3km)">
+          <set_command_action commandaction="commandaction.flyingto" param="$target"/>
+          <run_script name="'move.generic'" result="$movesuccess">
+            <param name="destination" value="$targetsector"/>
+            <param name="position" value="$slotpos"/>
+            <param name="endintargetzone" value="true"/>
+            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+            <param name="debugchance" value="$debugchance"/>
+          </run_script>
+        </do_if>
+
         <set_command_action commandaction="commandaction.standingby"/>
-        <wait min="10s" max="20s"/>
+        <wait min="5s" max="10s"/>
       </do_while>
 
       <label name="finish"/>
