@@ -27,6 +27,10 @@ Optional params (visible under "Advanced"):
 | Slot Index | auto | This ship's slot; auto-derives from position in wing. |
 | Timeout | 0s | 0 = infinite. |
 
+## Recommended leader
+
+Use an L (destroyer) or M (frigate / corvette) as the wing leader. **XL pathfinding currently has issues** — XL hulls work fine as subordinates.
+
 ## Formation behavior
 
 - **Solo ship** sits in slot 0 directly in front of the gate (offset slightly perpendicular to the highway centerline so XL/L hulls don't fight transiting mass traffic).
