@@ -32,9 +32,8 @@ Optional params (visible under "Advanced"):
 - **Solo ship** sits in slot 0 directly in front of the gate (offset slightly perpendicular to the highway centerline so XL/L hulls don't fight transiting mass traffic).
 - **Wings** sort subordinates by class — L/XL fill the inner ring (θ=30°, closer to leader), then M, then S and others spill into the outer ring (θ=60°) and the flat ring (θ=80°) beyond that.
 - **Leader is bastion-style**: holds position at slot 0, doesn't chase. Its weapons are flipped to `weaponmode.attackenemies` for the duration so turrets fire at any hostile that wanders into range. Existing `missiledefence` and `mining` turret assignments are preserved. Original modes are restored when the blockade ends.
-- **Subordinates** hold their slot via vanilla `MoveWait`. When the leader's hold loop scans hostiles within engagerange of the gate (every ~10s), each sub gets dispatched to `AttackInRange` anchored at its own slot — engages everything in range, then falls back to slot.
-
-Drift / facing correction runs every iteration with `forceposition + forcerotation`, so the leader converges on exact slot and facing across iterations rather than parking "close enough."
+- **Subordinates** hold their slot via vanilla `MoveWait`. They react to direct attacks via `MoveWait`'s built-in `InterruptAttack`. Once the leader has reached its slot, its hold loop scans for hostiles within `engagerange` of the gate (and of the leader itself); when one is found, each sub is dispatched to `AttackInRange` rallied on the leader's current position with `enforceradius`. Subs engage everything in range, then fall back to slot via their `MoveWait` default.
+- **Leader positioning** uses vanilla `move.generic` called once on entry to the order — matches how vanilla `MoveWait` positions subs. After arrival the script holds via `stop_moving` + `stop_boost` + `commandaction.standingby` (the same tail vanilla `order.move.wait` uses). The hold loop refines facing in place via a rotation-only `move_to` each iteration. The loop only re-runs `move.generic` if the leader is knocked materially off slot (drift > `$exittol`).
 
 When the leader's order is replaced or cancelled, the cleanup pass cancels each sub's current order and default order — switching gates won't leave a sub drifting back to the previous slot.
 
@@ -105,7 +104,8 @@ No vanilla files are diffed. The mod is pure additions, so it doesn't conflict w
 ## Compatibility
 
 - X4 9.0+. The order delegates to vanilla `move.generic` for pathing/positioning and dispatches vanilla `AttackInRange` for sub engagement, so combat behavior tracks vanilla changes automatically.
-- Leader weapon-mode override uses vanilla `lib.set.weaponmode` and restores the prior modes on finish/abort — uninstalling the mod after a blockade ended is clean. Uninstalling **during** an active blockade will leave the leader's weapons on `attackenemies` until the player resets the mode manually.
+- Leader weapon-mode override uses direct `<set_weapon_mode>` calls (one per combat weapon) and restores the prior modes on finish/abort — uninstalling the mod after a blockade ended is clean. Uninstalling **during** an active blockade will leave the leader's weapons on `attackenemies` until the player resets the mode manually.
+- Leader main-batteries: L/XL forward-mounted weapons don't auto-fire under the Blockade order (vanilla X4 requires an `Attack`-style order context to aim them, and dispatching such an order would tear down our scan loop). Turrets engage via the `attackenemies` mode flip; main batteries stay idle. Active L/XL engagement is on the roadmap.
 - All Egosoft DLCs supported (split, terran, pirate, boron, timelines).
 - Save-safe: the mod stores state under `md.$BBVarTable` and re-initializes missing keys on load.
 - Removing the mod mid-save will leave any spawned ships with an invalid order; they fall back to the previous default behavior.
