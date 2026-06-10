@@ -43,21 +43,24 @@ When the leader's order is replaced or cancelled, the cleanup pass cancels each 
 
 ## AI behavior
 
-Every 30 minutes (configurable in `md/blockade.xml`'s `VerifyVariables`), the mod scans every active gate. For each gate where:
+Every 30 minutes (configurable in `md/blockade.xml`'s `VerifyVariables`), `EventBlockadeScan` walks every active gate in the galaxy via `find_gate active="true" space="player.galaxy"`. For each gate:
 
-- the sector-side owner is at war with the destination-side owner, and
-- both factions are eligible (not Xenon/Khaak/civilian/player/etc.), and
-- the defender has at least one shipyard, and
-- no blockade fleet already covers this gate,
+- The **defender** is the sector-side owner (`$LocGate.sector.owner`); the **attacker** is the destination-side owner.
+- The pair must be actively hostile: `Defender.mayattack.{Attacker}` AND `Defender.relationto.{Attacker} le -0.25`.
+- Both must be real claimspace factions — the excluded list is `[xenon, khaak, yaki, scaleplate, player, civilian, criminal, smuggler, visitor]`. Anything in there on either side and the gate is skipped.
+- The defender must have at least one shipyard (`find_station_by_true_owner ... canbuildships="true"`).
+- No active blockade already on the gate. Two checks: (a) our own bookkeeping table (`$ActiveBlockades.{$LocGate}?`), and (b) a heuristic scan for any ship within 25 km of the gate whose current order is `Blockade` — this catches player-led blockades and blockades dispatched by other AI factions, so we don't pile multiple fleets onto the same gate.
 
-…a blockade fleet (1 destroyer + 3 frigates + 4 fighters by default) is spawned at the defender's nearest shipyard and dispatched. Each ship is assigned the Blockade order with a slot index, so they fan out into the hemisphere formation automatically.
+When all of that passes, `EventDispatchBlockade` spawns a fleet at the defender's nearest shipyard: **1 destroyer + 3 frigates + 4 fighters** by default (configurable via `$MinFleetCapital` / `$MinFleetEscort` / `$MinFleetFighter`), race-matched to the defender's primary race (Argon / Paranid / Teladi / Split / Terran / Boron, falling back to Argon for unknowns). Each ship is given the `Blockade` order independently with its own `$slotindex`. They're peers — not subordinated to a wing leader — so each calculates its hemisphere slot from its index and flies there.
 
-Existing blockades are checked the same interval and disbanded when:
+A logbook entry under the News category announces the deployment (string `{20810, 400}` in `t/0001.xml`), gated by `$NewsEnabled`.
+
+The same timer also runs `EventBlockadeMaintenance`, which checks each active blockade and disbands it (cancels the Blockade order on each surviving ship, removes the bookkeeping entry, writes a disband log entry) when:
 
 - the gate or its destination no longer exists,
-- the destination sector flipped to the defender's faction,
-- the war ended (relation > -0.1), or
-- all ships in the blockade are dead.
+- the destination sector flipped to the defender's faction (war was won),
+- relation has thawed (`Defender.relationto.{destination owner} gt -0.1`), or
+- all ships in the fleet have been destroyed.
 
 When an AI blockade is established or disbanded, a player logbook entry is written under the **News** category (gated by `$NewsEnabled`, default on). Uses vanilla `add_player_log` — no dependency on any external news framework.
 

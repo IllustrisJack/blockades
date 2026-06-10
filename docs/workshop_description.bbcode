@@ -31,14 +31,11 @@ Use an [b]L (destroyer)[/b] or [b]M (frigate / corvette)[/b] as the wing leader.
 [/list]
 
 [h2]AI auto-blockade[/h2]
-Every 30 minutes (configurable), the mod scans every active gate. Where:
-[list]
-[*]the sector-side owner is at war with the destination-side owner,
-[*]both factions are eligible (no Xenon, Khaak, civilians, etc.),
-[*]the defender has at least one shipyard, and
-[*]no blockade already covers the gate,
-[/list]
-…a fleet (1 destroyer + 3 frigates + 4 fighters by default, race-matched) is spawned at the defender's nearest shipyard and dispatched to the gate in formation. A player logbook entry is written under the News category. Blockades disband automatically when the war ends, the defender retakes the destination sector, the gate is destroyed, or all ships in the fleet are lost.
+Every 30 minutes (configurable), the mod walks every active gate in the galaxy and looks at the sector owner on each side. If the two owners are actively hostile (relation ≤ -0.25 and the engine flags them as may-attack) and both are real claimspace factions (Xenon, Khaak, Yaki, Scaleplate, Civilian/Criminal/Smuggler/Visitor sub-factions, and the player are skipped), the sector-side owner — the [i]defender[/i] — is considered as a possible blockade owner.
+
+If the defender has at least one shipyard, no blockade fleet (ours or anyone else's, including the player's, within 25 km of the gate) is already on this gate, [b]and we haven't already dispatched a blockade there in a prior tick[/b], the mod spawns a small force at that shipyard: by default [b]1 destroyer + 3 frigates + 4 fighters[/b], race-matched to the defender (Argon, Paranid, Teladi, Split, Terran, Boron, falling back to Argon for unknown races). Each of those ships is independently assigned the [b]Blockade[/b] order with its own slot index, so the group ends up arranged in the same hemisphere formation the player would see — but as peers running the order, not under a wing leader.
+
+A logbook entry under the News category announces the deployment. The mod re-checks each active blockade every 30 minutes and disbands it (cancels the Blockade order on surviving ships, removes the bookkeeping entry, and writes a disband log entry) when any of the following becomes true: the gate or its destination no longer exists, the destination sector flipped to the defender's faction (war was won), relation between the two has thawed (> -0.1), or all ships in the fleet have been destroyed.
 
 [h2]Compatibility[/h2]
 [list]
