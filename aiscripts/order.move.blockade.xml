@@ -451,18 +451,21 @@
         </do_elseif>
 
         <do_if value="$wasintransit">
-          <!-- In-transit: yield-friendly steering to slot. forceposition is
-               false (we don't need to nail the exact m here — that's the
-               next iteration's job). forcerotation steers toward target
-               facing while moving. interrupt_after_time returns control to
-               the loop every 5s so scan can fire. -->
-          <move_to object="this.ship" destination="$targetsector"
-                   finishonapproach="true" forcerotation="true" forceposition="false"
-                   uselocalhighways="not this.ship.iscapitalship" commandaction="false">
-            <position value="$slotpos"/>
-            <rotation value="$LocFaceRot"/>
-            <interrupt_after_time time="5s"/>
-          </move_to>
+          <!-- In-transit: use move.generic with precise=true. <move_to>
+               doesn't pathfind cross-sector and was too loose in-sector
+               (leader stopping km away from slot). move.generic blocks
+               this script until arrival, so scan won't fire during the
+               transit — subs still react via vanilla MoveWait's built-in
+               InterruptAttack on their own slots. After arrival, the
+               at-slot branch takes over and scan fires every iteration. -->
+          <run_script name="'move.generic'" result="$movesuccess">
+            <param name="destination" value="$targetsector"/>
+            <param name="position" value="$slotpos"/>
+            <param name="precise" value="true"/>
+            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+            <param name="debugchance" value="$debugchance"/>
+          </run_script>
+          <stop_moving object="this.ship"/>
         </do_if>
         <do_else>
           <!-- At-slot: rotate-in-place. forceposition=true with current
