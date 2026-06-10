@@ -232,7 +232,10 @@
             <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
-          <create_order id="'MoveWait'" object="$LocSub" default="false" immediate="true">
+          <!-- Omit default attribute entirely on active orders. X4 treats
+               default="false" as still flagging this as a default-style
+               order and silently ignores immediate="true". -->
+          <create_order id="'MoveWait'" object="$LocSub" immediate="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
             <param name="lookat" value="$LocLookatPos"/>
             <param name="timeout" value="0s"/>
@@ -345,17 +348,18 @@
         <resume label="finish"/>
       </do_if>
 
-      <!-- Initial decisive fly-to-slot. forceposition + forcerotation runs
-           move.generic to actual arrival at the exact point and facing,
-           then returns. Kill residual velocity with stop_moving so the
-           ship doesn't coast past slot on momentum (XL hulls in particular
-           carry several km/s of drift after the "arrive" tolerance). -->
+      <!-- Initial decisive fly-to-slot. precise=true skips safepos and
+           position randomization so move.generic aims for the EXACT
+           supplied position rather than a "near enough" point. lookat
+           handles facing. forceposition/forcerotation params from earlier
+           attempts are NOT valid on move.generic — the engine warns and
+           ignores them. Kill residual velocity with stop_moving so XL
+           hulls don't coast past slot on momentum. -->
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
       <run_script name="'move.generic'" result="$movesuccess">
         <param name="destination" value="$targetsector"/>
         <param name="position" value="$slotpos"/>
-        <param name="forceposition" value="true"/>
-        <param name="forcerotation" value="true"/>
+        <param name="precise" value="true"/>
         <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
         <param name="debugchance" value="$debugchance"/>
       </run_script>
@@ -416,7 +420,7 @@
             <debug_text text="'Blockade: hostile %s detected, dispatching subs to leader pos.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
             <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
               <do_if value="@$LocSub.order.id == 'MoveWait'">
-                <create_order id="'AttackInRange'" object="$LocSub" default="false" immediate="true">
+                <create_order id="'AttackInRange'" object="$LocSub" immediate="true">
                   <param name="destination" value="[$targetsector, $LocRallyPos]"/>
                   <param name="radius" value="$engagerange"/>
                   <param name="pursuetargets" value="$pursuetargets"/>
@@ -431,13 +435,13 @@
 
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
         <do_if value="$slotdist gt 500m">
-          <!-- Drift correction: full re-position. -->
+          <!-- Drift correction: full re-position via move.generic with
+               precise=true for exact arrival. -->
           <set_command_action commandaction="commandaction.flyingto" param="$target"/>
           <run_script name="'move.generic'" result="$movesuccess">
             <param name="destination" value="$targetsector"/>
             <param name="position" value="$slotpos"/>
-            <param name="forceposition" value="true"/>
-            <param name="forcerotation" value="true"/>
+            <param name="precise" value="true"/>
             <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
             <param name="debugchance" value="$debugchance"/>
           </run_script>
@@ -447,7 +451,9 @@
         <do_else>
           <!-- Rotate-only refinement: ship stays put, facing tracks gate.
                $lookaway flips the orientation so the ship faces back into
-               the sector instead of toward the gate. -->
+               the sector instead of toward the gate.
+               forceposition / forcerotation ARE valid on the <move_to>
+               XML primitive (not on move.generic). -->
           <do_if value="$lookaway">
             <create_orientation name="$LocFaceRot" orientation="look_away" refobject="$target">
               <position object="this.ship"/>
