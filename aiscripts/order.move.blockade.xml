@@ -310,29 +310,25 @@
 
     <!-- Leader weapon-mode override: bastion-style leader sits at slot and
          doesn't actively chase, but its weapons should fire at any enemy
-         that wanders into range — turrets default to weaponmode.defend
-         (only return fire when attacked) which is too passive for a
-         blockade. Flip everything to weaponmode.attackenemies; preserve
-         existing missiledefence / mining assignments so per-turret roles
-         like anti-missile turrets keep their dedicated job. Stash the
-         prior modes in $weaponmodebackup so finish/on_abort can restore
-         them when the blockade ends. -->
+         that wanders into range. Default weaponmode.defend only returns
+         fire when attacked — too passive for a blockade. Flip everything
+         to weaponmode.attackenemies and stash the previous mode per-weapon
+         in $weaponmodebackup so finish/on_abort can restore exactly.
+         Preserve missiledefence and mining assignments so per-turret
+         roles like anti-missile coverage aren't trampled. Direct
+         <set_weapon_mode> calls (bypass lib.set.weaponmode) — the lib
+         wrapper was leaving modes unchanged for some weapon classes. -->
     <do_if value="not $abort?">
       <find_object_component name="$LocAllWeapons" object="this.assignedcontrolled" weapontype="combat" multiple="true"/>
-      <set_value name="$LocPreservedModes" exact="table[]"/>
+      <set_value name="$weaponmodebackup" exact="table[]"/>
       <do_for_each name="$LocW" in="$LocAllWeapons">
-        <do_if value="$LocW.mode == weaponmode.missiledefence or $LocW.mode == weaponmode.mining">
-          <set_value name="$LocPreservedModes.{$LocW}" exact="$LocW.mode"/>
+        <set_value name="$weaponmodebackup.{$LocW}" exact="$LocW.mode"/>
+        <do_if value="$LocW.mode != weaponmode.missiledefence and $LocW.mode != weaponmode.mining">
+          <set_weapon_mode weapon="$LocW" weaponmode="weaponmode.attackenemies"/>
         </do_if>
       </do_for_each>
-      <run_script name="'lib.set.weaponmode'" result="$weaponmodebackup">
-        <param name="controllable" value="this.assignedcontrolled"/>
-        <param name="weaponmode" value="weaponmode.attackenemies"/>
-        <param name="weaponmodes" value="$LocPreservedModes"/>
-        <param name="debugchance" value="$debugchance"/>
-      </run_script>
+      <debug_text text="'Blockade: leader weapons set, %s weapons captured (%s switched to attackenemies).'.[$LocAllWeapons.count, $weaponmodebackup.keys.count]" chance="$debugchance"/>
       <remove_value name="$LocAllWeapons"/>
-      <remove_value name="$LocPreservedModes"/>
     </do_if>
 
     <set_value name="$inittime" exact="player.age"/>
@@ -349,11 +345,11 @@
         <resume label="finish"/>
       </do_if>
 
-      <!-- Initial decisive fly-to-slot. forceposition + forcerotation so
-           move.generic runs to actual arrival at the exact point and the
-           exact facing, then returns. Previously this used endintargetzone
-           which finished as soon as the ship entered the gate's zone —
-           ship ended up "close to" slot but never exactly on it. -->
+      <!-- Initial decisive fly-to-slot. forceposition + forcerotation runs
+           move.generic to actual arrival at the exact point and facing,
+           then returns. Kill residual velocity with stop_moving so the
+           ship doesn't coast past slot on momentum (XL hulls in particular
+           carry several km/s of drift after the "arrive" tolerance). -->
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
       <run_script name="'move.generic'" result="$movesuccess">
         <param name="destination" value="$targetsector"/>
@@ -363,6 +359,7 @@
         <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
         <param name="debugchance" value="$debugchance"/>
       </run_script>
+      <stop_moving object="this.ship"/>
       <do_if value="not $movesuccess">
         <debug_text text="'Blockade: initial move did not complete cleanly in %s; entering hold loop anyway.'.[$targetsector.knownname]" chance="$debugchance"/>
       </do_if>
@@ -370,17 +367,17 @@
       <set_order_syncpoint_reached order="this.ship.order"/>
       <set_command_action commandaction="commandaction.standingby"/>
 
-      <!-- Bastion hold loop. Each iteration:
-             1. Scan for hostiles near the gate; dispatch AttackInRange to
-                each sub anchored at the sub's own slot.
-             2. Drift check — ONLY re-issue move.generic if we've been
-                knocked materially off slot (e.g. mass-traffic shove,
-                weapon impulse). Calling move.generic on every iteration
-                was the overshoot bug: each restart re-decelerated mid-
-                approach, the ship coasted past, then the next restart
-                fought to come back. Ship now stays still between drift
-                events.
-             3. Wait, repeat.
+      <!-- Bastion hold loop:
+             1. Scan + dispatch (every iteration).
+             2. If drifted > 500m off slot — re-position via move.generic
+                then stop_moving. (size+3km was way too loose; user wants
+                tight discipline.)
+             3. Else — rotate-only refinement. Vanilla pattern from
+                move.attack.object.capital.xml: create_orientation
+                "look_at" the target, then move_to at current position
+                with forcerotation=true forceposition=false. The ship
+                rotates in place without translating.
+             4. Wait, repeat.
            Leader combat is vanilla turrets + InterruptAttack handler. -->
       <do_while value="$target.exists">
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
@@ -412,11 +409,9 @@
           </do_if>
         </do_if>
 
-        <!-- Drift correction: only re-issue movement when actually drifted
-             > size + 3km from slot. forceposition + forcerotation ensures
-             the corrective move ends exactly at slot/facing. -->
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt (this.ship.size + 3km)">
+        <do_if value="$slotdist gt 500m">
+          <!-- Drift correction: full re-position. -->
           <set_command_action commandaction="commandaction.flyingto" param="$target"/>
           <run_script name="'move.generic'" result="$movesuccess">
             <param name="destination" value="$targetsector"/>
@@ -426,8 +421,30 @@
             <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
             <param name="debugchance" value="$debugchance"/>
           </run_script>
+          <stop_moving object="this.ship"/>
           <set_command_action commandaction="commandaction.standingby"/>
         </do_if>
+        <do_else>
+          <!-- Rotate-only refinement: ship stays put, facing tracks gate.
+               $lookaway flips the orientation so the ship faces back into
+               the sector instead of toward the gate. -->
+          <do_if value="$lookaway">
+            <create_orientation name="$LocFaceRot" orientation="look_away" refobject="$target">
+              <position object="this.ship"/>
+            </create_orientation>
+          </do_if>
+          <do_else>
+            <create_orientation name="$LocFaceRot" orientation="look_at" refobject="$target">
+              <position object="this.ship"/>
+            </create_orientation>
+          </do_else>
+          <move_to object="this.ship" destination="$targetsector" forcerotation="true" forceposition="false" commandaction="false">
+            <position object="this.ship"/>
+            <rotation value="$LocFaceRot"/>
+            <interrupt_after_time time="3s"/>
+          </move_to>
+          <remove_value name="$LocFaceRot"/>
+        </do_else>
 
         <wait min="10s" max="20s"/>
       </do_while>
@@ -449,16 +466,14 @@
         </do_for_each>
       </do_if>
 
-      <!-- Restore leader weapon modes to whatever the player had configured
-           before the blockade. lib.set.weaponmode returns $oldweaponmodes as
-           a table keyed by weapon → prior mode; feed it back as weaponmodes
-           so each turret restores exactly. -->
-      <do_if value="$weaponmodebackup? and $weaponmodebackup">
-        <run_script name="'lib.set.weaponmode'">
-          <param name="controllable" value="this.assignedcontrolled"/>
-          <param name="weaponmodes" value="$weaponmodebackup"/>
-          <param name="debugchance" value="$debugchance"/>
-        </run_script>
+      <!-- Restore leader weapon modes to whatever was set pre-blockade.
+           $weaponmodebackup is a table[weapon -> mode]; replay each entry. -->
+      <do_if value="$weaponmodebackup? and ($weaponmodebackup.keys.count gt 0)">
+        <do_for_each name="$LocRW" in="$weaponmodebackup.keys.list">
+          <do_if value="$LocRW.exists">
+            <set_weapon_mode weapon="$LocRW" weaponmode="$weaponmodebackup.{$LocRW}"/>
+          </do_if>
+        </do_for_each>
       </do_if>
     </actions>
   </attention>
@@ -475,12 +490,12 @@
         </do_if>
       </do_for_each>
     </do_if>
-    <do_if value="$weaponmodebackup? and $weaponmodebackup">
-      <run_script name="'lib.set.weaponmode'">
-        <param name="controllable" value="this.assignedcontrolled"/>
-        <param name="weaponmodes" value="$weaponmodebackup"/>
-        <param name="debugchance" value="$debugchance"/>
-      </run_script>
+    <do_if value="$weaponmodebackup? and ($weaponmodebackup.keys.count gt 0)">
+      <do_for_each name="$LocRW" in="$weaponmodebackup.keys.list">
+        <do_if value="$LocRW.exists">
+          <set_weapon_mode weapon="$LocRW" weaponmode="$weaponmodebackup.{$LocRW}"/>
+        </do_if>
+      </do_for_each>
     </do_if>
   </on_abort>
 </aiscript>
