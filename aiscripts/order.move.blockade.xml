@@ -308,7 +308,14 @@
                        x="$slotx" y="$sloty" z="$slotz"
                        object="$target"/>
 
-      <debug_text text="'Blockade: gate %s, slot %s/%s (size=%sm, effd=%sm), theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, this.ship.size, $effdistance, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
+      <!-- Slot-arrival tolerance scaled by ship size; XL hulls can't realistically
+           settle within 500m. Hysteresis: enter at-slot at $arrivaltol, exit at
+           $exittol so the leader doesn't ping-pong between in-transit and at-slot
+           on the edge of the threshold. -->
+      <set_value name="$arrivaltol" exact="[500m, this.ship.size * 2.0f].max"/>
+      <set_value name="$exittol" exact="$arrivaltol * 2.0f"/>
+
+      <debug_text text="'Blockade: gate %s, slot %s/%s (size=%sm, effd=%sm, arrivaltol=%sm), theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, this.ship.size, $effdistance, $arrivaltol, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
     </do_if>
 
     <!-- Leader weapon-mode override: bastion-style leader sits at slot and
@@ -344,59 +351,38 @@
 
       <label name="start"/>
 
-      <do_if value="not $target.exists or not $target.isclass.gate">
-        <resume label="finish"/>
-      </do_if>
+      <!-- Unified hold loop. No blocking initial move.generic — that pattern
+           left subordinates idle until the leader arrived because the
+           script was stuck inside run_script for the entire transit. Now
+           every iteration scans + dispatches first, then moves OR rotates
+           with bounded time. Scan latency is ~5-10s during transit, ~10-20s
+           when settled.
 
-      <!-- Initial decisive fly-to-slot. precise=true skips safepos and
-           position randomization so move.generic aims for the EXACT
-           supplied position rather than a "near enough" point. lookat
-           handles facing. forceposition/forcerotation params from earlier
-           attempts are NOT valid on move.generic — the engine warns and
-           ignores them. Kill residual velocity with stop_moving so XL
-           hulls don't coast past slot on momentum. -->
+           In-transit branch (slotdist > $arrivaltol) uses the <move_to>
+           XML primitive with finishonapproach + interrupt_after_time so the
+           loop yields back to scan every few seconds while the ship steers
+           toward slot. <rotation> is applied throughout so facing converges
+           continuously rather than only after arrival.
+
+           Once in slot ($wasintransit transition), set_order_syncpoint_reached
+           fires once. Subsequent iterations do rotation-only refinement
+           plus a longer wait. Hysteresis on exit ($exittol = 2 * arrivaltol)
+           prevents oscillation on the threshold edge. -->
+      <set_value name="$wasintransit" exact="true"/>
+      <set_value name="$synced" exact="false"/>
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-      <run_script name="'move.generic'" result="$movesuccess">
-        <param name="destination" value="$targetsector"/>
-        <param name="position" value="$slotpos"/>
-        <param name="precise" value="true"/>
-        <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
-        <param name="debugchance" value="$debugchance"/>
-      </run_script>
-      <stop_moving object="this.ship"/>
-      <do_if value="not $movesuccess">
-        <debug_text text="'Blockade: initial move did not complete cleanly in %s; entering hold loop anyway.'.[$targetsector.knownname]" chance="$debugchance"/>
-      </do_if>
 
-      <set_order_syncpoint_reached order="this.ship.order"/>
-      <set_command_action commandaction="commandaction.standingby"/>
-
-      <!-- Bastion hold loop:
-             1. Scan + dispatch (every iteration).
-             2. If drifted > 500m off slot — re-position via move.generic
-                then stop_moving. (size+3km was way too loose; user wants
-                tight discipline.)
-             3. Else — rotate-only refinement. Vanilla pattern from
-                move.attack.object.capital.xml: create_orientation
-                "look_at" the target, then move_to at current position
-                with forcerotation=true forceposition=false. The ship
-                rotates in place without translating.
-             4. Wait, repeat.
-           Leader combat is vanilla turrets + InterruptAttack handler. -->
       <do_while value="$target.exists">
+        <do_if value="not $target.exists or not $target.isclass.gate">
+          <resume label="finish"/>
+        </do_if>
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
           <resume label="finish"/>
         </do_if>
 
-        <!-- Two-tier scan + dispatch. Trigger conditions for sub dispatch:
-               a) hostile within engagerange of the gate (transit threat)
-               b) hostile within engagerange of the leader itself
-                  — covers the case where the leader is mid-transit and
-                  getting attacked far from the gate; without this, subs
-                  sit at their slots while their commander is under fire.
-             Dispatch destination = leader's current position (not slot)
-             so subs converge on the actual fight. After engagement, subs
-             fall back to MoveWait default and return to their slots. -->
+        <!-- Two-tier scan + dispatch (gate vicinity → leader vicinity).
+             Rally destination = leader's current position so subs converge
+             on the fight, wherever it is. -->
         <do_if value="this.assignedcontrolled.subordinates.count gt 0">
           <set_value name="$LocBlockadeHostile" exact="null"/>
           <find_object name="$LocBlockadeHostile"
@@ -433,46 +419,74 @@
           </do_if>
         </do_if>
 
-        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt 500m">
-          <!-- Drift correction: full re-position via move.generic with
-               precise=true for exact arrival. -->
-          <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-          <run_script name="'move.generic'" result="$movesuccess">
-            <param name="destination" value="$targetsector"/>
-            <param name="position" value="$slotpos"/>
-            <param name="precise" value="true"/>
-            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
-            <param name="debugchance" value="$debugchance"/>
-          </run_script>
-          <stop_moving object="this.ship"/>
-          <set_command_action commandaction="commandaction.standingby"/>
+        <!-- Compute desired facing once per iteration. Used by both
+             branches so rotation refinement is continuous. -->
+        <do_if value="$lookaway">
+          <create_orientation name="$LocFaceRot" orientation="look_away" refobject="$target">
+            <position object="this.ship"/>
+          </create_orientation>
         </do_if>
         <do_else>
-          <!-- Rotate-only refinement: ship stays put, facing tracks gate.
-               $lookaway flips the orientation so the ship faces back into
-               the sector instead of toward the gate.
-               forceposition / forcerotation ARE valid on the <move_to>
-               XML primitive (not on move.generic). -->
-          <do_if value="$lookaway">
-            <create_orientation name="$LocFaceRot" orientation="look_away" refobject="$target">
-              <position object="this.ship"/>
-            </create_orientation>
+          <create_orientation name="$LocFaceRot" orientation="look_at" refobject="$target">
+            <position object="this.ship"/>
+          </create_orientation>
+        </do_else>
+
+        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+
+        <!-- State transition: at-slot → in-transit (drift exceeded $exittol)
+             vs in-transit → at-slot (entered $arrivaltol). -->
+        <do_if value="$wasintransit and ($slotdist le $arrivaltol)">
+          <set_value name="$wasintransit" exact="false"/>
+          <stop_moving object="this.ship"/>
+          <set_command_action commandaction="commandaction.standingby"/>
+          <do_if value="not $synced">
+            <set_order_syncpoint_reached order="this.ship.order"/>
+            <set_value name="$synced" exact="true"/>
           </do_if>
-          <do_else>
-            <create_orientation name="$LocFaceRot" orientation="look_at" refobject="$target">
-              <position object="this.ship"/>
-            </create_orientation>
-          </do_else>
-          <move_to object="this.ship" destination="$targetsector" forcerotation="true" forceposition="false" commandaction="false">
+        </do_if>
+        <do_elseif value="(not $wasintransit) and ($slotdist gt $exittol)">
+          <set_value name="$wasintransit" exact="true"/>
+          <set_command_action commandaction="commandaction.flyingto" param="$target"/>
+        </do_elseif>
+
+        <do_if value="$wasintransit">
+          <!-- In-transit: yield-friendly steering to slot. forceposition is
+               false (we don't need to nail the exact m here — that's the
+               next iteration's job). forcerotation steers toward target
+               facing while moving. interrupt_after_time returns control to
+               the loop every 5s so scan can fire. -->
+          <move_to object="this.ship" destination="$targetsector"
+                   finishonapproach="true" forcerotation="true" forceposition="false"
+                   uselocalhighways="not this.ship.iscapitalship" commandaction="false">
+            <position value="$slotpos"/>
+            <rotation value="$LocFaceRot"/>
+            <interrupt_after_time time="5s"/>
+          </move_to>
+        </do_if>
+        <do_else>
+          <!-- At-slot: rotate-in-place. forceposition=true with current
+               position pins translation, forcerotation=true converges
+               facing on $LocFaceRot. Short interrupt — facing converges
+               fast and scan needs to keep firing. -->
+          <move_to object="this.ship" destination="$targetsector"
+                   forcerotation="true" forceposition="true" commandaction="false">
             <position object="this.ship"/>
             <rotation value="$LocFaceRot"/>
             <interrupt_after_time time="3s"/>
           </move_to>
-          <remove_value name="$LocFaceRot"/>
         </do_else>
 
-        <wait min="10s" max="20s"/>
+        <remove_value name="$LocFaceRot"/>
+
+        <!-- Pacing. Tighter while in transit so scan reacts quickly to a
+             developing fight; relaxed once settled. -->
+        <do_if value="$wasintransit">
+          <wait min="2s" max="5s"/>
+        </do_if>
+        <do_else>
+          <wait min="10s" max="20s"/>
+        </do_else>
       </do_while>
 
       <label name="finish"/>

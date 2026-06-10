@@ -229,10 +229,11 @@
 						]"/>
 
 						<do_if value="$BBVT.$NewsEnabled and ($Ships.count gt 0)">
-							<add_player_log title="{20810, 100}"
-							                text="{20810, 400}.[$Defender.name, $Gate.knownname, $Sector.knownname]"
-							                faction="$Defender"
-							                category="news"/>
+							<write_to_logbook category="news"
+							                  title="{20810, 100}"
+							                  text="{20810, 400}.[$Defender.name, $Gate.knownname, $Sector.knownname]"
+							                  faction="$Defender"
+							                  object="$Gate"/>
 						</do_if>
 
 						<do_if value="$BBVT.$DebugDetailed">
@@ -303,10 +304,11 @@
 
 					<do_if value="$ShouldDisband">
 						<do_if value="$BBVT.$NewsEnabled and $Gate.exists">
-							<add_player_log title="{20810, 100}"
-							                text="{20810, 401}.[$Gate.knownname]"
-							                faction="$Defender"
-							                category="news"/>
+							<write_to_logbook category="news"
+							                  title="{20810, 100}"
+							                  text="{20810, 401}.[$Gate.knownname]"
+							                  faction="$Defender"
+							                  object="$Gate"/>
 						</do_if>
 						<do_if value="$BBVT.$DebugDetailed">
 							<debug_text text="'BB: disbanding blockade at %s.'.[@$Gate.knownname]" filter="general"/>
