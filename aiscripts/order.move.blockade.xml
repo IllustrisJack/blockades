@@ -255,11 +255,19 @@
 
     <!-- Compute slot coordinates in the gate's local frame.
          Hemisphere layout:
-           slot 0          → center (theta=0,  directly in front)
+           slot 0          → center (theta=0,  directly in front; leader)
            slots 1..6      → inner ring (theta=30°)
            slots 7..12     → outer ring (theta=60°)
            slots 13+       → flat ring (theta=80°)
-         theta is the polar angle from the gate's +Z (hostile-side) axis. -->
+         theta is the polar angle from the gate's +Z (hostile-side) axis.
+
+         Slot 0 sits on the gate's z-axis, which is exactly the highway
+         centerline mass traffic flows along. XL/L ships then fight pathing
+         and collision avoidance against transiting NPCs and can never reach
+         the slot. Offset slot 0 perpendicular to the highway (+y, "above"
+         the gate plane) by ~2km plus the ship's own size so larger hulls
+         get more clearance. Rings 1+ already sit off-axis (sin θ ≠ 0) so
+         they don't need this. -->
     <do_if value="not $abort?">
       <do_if value="$resolvedslot == 0">
         <set_value name="$theta" exact="0.0f"/>
@@ -286,6 +294,12 @@
       <set_value name="$slotx" exact="$effdistance * sin($theta) * cos($phi)"/>
       <set_value name="$sloty" exact="$effdistance * sin($theta) * sin($phi)"/>
       <set_value name="$slotz" exact="$zsign * $effdistance * cos($theta)"/>
+
+      <!-- Highway-clearance offset for leader (slot 0 only). Push 2km + size
+           in +y so the leader sits above the highway centerline. -->
+      <do_if value="$resolvedslot == 0">
+        <set_value name="$sloty" exact="2km + this.ship.size"/>
+      </do_if>
 
       <create_position name="$slotpos" space="$targetsector"
                        x="$slotx" y="$sloty" z="$slotz"
