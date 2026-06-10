@@ -41,17 +41,23 @@ param(
     [string]$WorkshopTool
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"  # WorkshopTool writes harmless banners to stderr on every run; Stop would treat them as fatal
 
 $ModName = "blockades"
 
 function Get-SteamLibraries {
-    $roots = @(
+    $roots = @()
+    try {
+        $reg = (Get-ItemProperty -Path "HKCU:\Software\Valve\Steam" -Name SteamPath -ErrorAction Stop).SteamPath
+        if ($reg) { $roots += $reg }
+    } catch {}
+    $roots += @(
         "$env:ProgramFiles(x86)\Steam",
         "$env:ProgramFiles\Steam"
     )
     $libs = @()
     foreach ($s in $roots) {
+        if (-not $s) { continue }
         $vdf = Join-Path $s "steamapps\libraryfolders.vdf"
         if (Test-Path $vdf) {
             foreach ($m in (Select-String -Path $vdf -Pattern '"path"\s+"([^"]+)"' -AllMatches).Matches) {
@@ -83,7 +89,7 @@ if (-not $WorkshopTool) {
     $WorkshopTool = Find-WorkshopTool
 }
 if (-not $WorkshopTool -or -not (Test-Path $WorkshopTool)) {
-    Write-Error "WorkshopTool.exe not found. Install Egosoft's free 'X Tools' from Steam Library, then re-run or pass -WorkshopTool '<path>'."
+    Write-Error "WorkshopTool.exe not found. Install Egosoft free X Tools from Steam Library, then re-run or pass -WorkshopTool <path>."
     exit 1
 }
 
@@ -91,13 +97,13 @@ if (-not $ModPath) {
     $ModPath = Find-X4Extension -Name $ModName
 }
 if (-not $ModPath -or -not (Test-Path $ModPath)) {
-    Write-Error "Mod path not found. Deploy the mod to <SteamLibrary>\steamapps\common\X4 Foundations\extensions\$ModName first, or pass -ModPath '<path>'."
+    Write-Error ("Mod path not found. Deploy the mod to <SteamLibrary>\steamapps\common\X4 Foundations\extensions\" + $ModName + " first, or pass -ModPath <path>.")
     exit 1
 }
 
 $contentXml = Join-Path $ModPath "content.xml"
 if (-not (Test-Path $contentXml)) {
-    Write-Error "content.xml missing at $contentXml — not a valid X4 mod folder."
+    Write-Error ("content.xml missing at " + $contentXml + " - not a valid X4 mod folder.")
     exit 1
 }
 
