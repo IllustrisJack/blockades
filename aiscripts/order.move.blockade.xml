@@ -349,18 +349,17 @@
         <resume label="finish"/>
       </do_if>
 
+      <!-- Initial decisive fly-to-slot. forceposition + forcerotation so
+           move.generic runs to actual arrival at the exact point and the
+           exact facing, then returns. Previously this used endintargetzone
+           which finished as soon as the ship entered the gate's zone —
+           ship ended up "close to" slot but never exactly on it. -->
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-
-      <!-- Initial fly-to-slot via move.generic. Don't retry-loop on failure —
-           that traps the leader (especially XL/L) outside the hold loop, so the
-           scan that dispatches subs to engage never fires. Just kick off the
-           initial move and fall through; the hold loop below has its own drift
-           correction that will keep trying, and the scan runs every iteration
-           regardless. -->
       <run_script name="'move.generic'" result="$movesuccess">
         <param name="destination" value="$targetsector"/>
         <param name="position" value="$slotpos"/>
-        <param name="endintargetzone" value="true"/>
+        <param name="forceposition" value="true"/>
+        <param name="forcerotation" value="true"/>
         <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
         <param name="debugchance" value="$debugchance"/>
       </run_script>
@@ -369,29 +368,26 @@
       </do_if>
 
       <set_order_syncpoint_reached order="this.ship.order"/>
+      <set_command_action commandaction="commandaction.standingby"/>
 
-      <!-- Bastion hold loop with proactive engagement coordination.
-           Leader sits at slot. Each iteration:
-             1. Drift correction if we're out of slot.
-             2. Scan for hostiles near the gate (engagerange radius around
-                $target). If any found, dispatch create_order AttackInRange to
-                each sub anchored at sub's own slot. Each sub's MoveWait
-                aborts; AttackInRange runs; when target is gone, sub falls back
-                to MoveWait default → returns to its slot.
+      <!-- Bastion hold loop. Each iteration:
+             1. Scan for hostiles near the gate; dispatch AttackInRange to
+                each sub anchored at the sub's own slot.
+             2. Drift check — ONLY re-issue move.generic if we've been
+                knocked materially off slot (e.g. mass-traffic shove,
+                weapon impulse). Calling move.generic on every iteration
+                was the overshoot bug: each restart re-decelerated mid-
+                approach, the ship coasted past, then the next restart
+                fought to come back. Ship now stays still between drift
+                events.
              3. Wait, repeat.
-           The leader's own combat is handled by vanilla turrets + InterruptAttack
-           handler. We don't need to dispatch attacks to ourselves. -->
+           Leader combat is vanilla turrets + InterruptAttack handler. -->
       <do_while value="$target.exists">
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
           <resume label="finish"/>
         </do_if>
 
-        <!-- Scan FIRST every iteration. Runs unconditionally, even before drift
-             correction — that way subs engage as soon as a hostile appears,
-             regardless of whether the leader has reached its slot yet (XL/L
-             ships can take a while). Scan is against the gate's sector with a
-             radius around the gate itself, anchored at the sub's own slot for
-             positional discipline. -->
+        <!-- Scan + dispatch. -->
         <do_if value="this.assignedcontrolled.subordinates.count gt 0">
           <find_object name="$LocBlockadeHostile"
                        object="$target"
@@ -403,8 +399,6 @@
           <do_if value="$LocBlockadeHostile">
             <debug_text text="'Blockade: hostile %s detected at gate, dispatching subs to engage.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
             <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-              <!-- Only dispatch if sub is currently on MoveWait (not already
-                   in combat from a prior dispatch). -->
               <do_if value="@$LocSub.order.id == 'MoveWait'">
                 <create_order id="'AttackInRange'" object="$LocSub" default="false" immediate="true">
                   <param name="destination" value="[$targetsector, $slotpos]"/>
@@ -418,27 +412,24 @@
           </do_if>
         </do_if>
 
-        <!-- Polish every iteration. forceposition + forcerotation makes
-             move.generic converge on the exact point AND keep refining
-             facing — when the ship is already at slot, this becomes a
-             rotation-only correction (no thrust spent on translation).
-             flyingto command label only when actually translating;
-             otherwise stay on standingby so the UI doesn't blink. -->
+        <!-- Drift correction: only re-issue movement when actually drifted
+             > size + 3km from slot. forceposition + forcerotation ensures
+             the corrective move ends exactly at slot/facing. -->
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt (this.ship.size + 1km)">
+        <do_if value="$slotdist gt (this.ship.size + 3km)">
           <set_command_action commandaction="commandaction.flyingto" param="$target"/>
+          <run_script name="'move.generic'" result="$movesuccess">
+            <param name="destination" value="$targetsector"/>
+            <param name="position" value="$slotpos"/>
+            <param name="forceposition" value="true"/>
+            <param name="forcerotation" value="true"/>
+            <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
+            <param name="debugchance" value="$debugchance"/>
+          </run_script>
+          <set_command_action commandaction="commandaction.standingby"/>
         </do_if>
-        <run_script name="'move.generic'" result="$movesuccess">
-          <param name="destination" value="$targetsector"/>
-          <param name="position" value="$slotpos"/>
-          <param name="forceposition" value="true"/>
-          <param name="forcerotation" value="true"/>
-          <param name="lookat" value="if $lookaway then this.ship.position else $target.position"/>
-          <param name="debugchance" value="$debugchance"/>
-        </run_script>
 
-        <set_command_action commandaction="commandaction.standingby"/>
-        <wait min="5s" max="10s"/>
+        <wait min="10s" max="20s"/>
       </do_while>
 
       <label name="finish"/>
