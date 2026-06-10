@@ -308,6 +308,33 @@
       <debug_text text="'Blockade: gate %s, slot %s/%s (size=%sm, effd=%sm), theta=%sdeg phi=%sdeg, pos=%s'.[$target.knownname, $resolvedslot, $resolvedsize, this.ship.size, $effdistance, $theta / 1deg, $phi / 1deg, $slotpos]" chance="$debugchance"/>
     </do_if>
 
+    <!-- Leader weapon-mode override: bastion-style leader sits at slot and
+         doesn't actively chase, but its weapons should fire at any enemy
+         that wanders into range — turrets default to weaponmode.defend
+         (only return fire when attacked) which is too passive for a
+         blockade. Flip everything to weaponmode.attackenemies; preserve
+         existing missiledefence / mining assignments so per-turret roles
+         like anti-missile turrets keep their dedicated job. Stash the
+         prior modes in $weaponmodebackup so finish/on_abort can restore
+         them when the blockade ends. -->
+    <do_if value="not $abort?">
+      <find_object_component name="$LocAllWeapons" object="this.assignedcontrolled" weapontype="combat" multiple="true"/>
+      <set_value name="$LocPreservedModes" exact="table[]"/>
+      <do_for_each name="$LocW" in="$LocAllWeapons">
+        <do_if value="$LocW.mode == weaponmode.missiledefence or $LocW.mode == weaponmode.mining">
+          <set_value name="$LocPreservedModes.{$LocW}" exact="$LocW.mode"/>
+        </do_if>
+      </do_for_each>
+      <run_script name="'lib.set.weaponmode'" result="$weaponmodebackup">
+        <param name="controllable" value="this.assignedcontrolled"/>
+        <param name="weaponmode" value="weaponmode.attackenemies"/>
+        <param name="weaponmodes" value="$LocPreservedModes"/>
+        <param name="debugchance" value="$debugchance"/>
+      </run_script>
+      <remove_value name="$LocAllWeapons"/>
+      <remove_value name="$LocPreservedModes"/>
+    </do_if>
+
     <set_value name="$inittime" exact="player.age"/>
   </init>
   <attention min="unknown">
@@ -430,6 +457,18 @@
           </do_if>
         </do_for_each>
       </do_if>
+
+      <!-- Restore leader weapon modes to whatever the player had configured
+           before the blockade. lib.set.weaponmode returns $oldweaponmodes as
+           a table keyed by weapon → prior mode; feed it back as weaponmodes
+           so each turret restores exactly. -->
+      <do_if value="$weaponmodebackup? and $weaponmodebackup">
+        <run_script name="'lib.set.weaponmode'">
+          <param name="controllable" value="this.assignedcontrolled"/>
+          <param name="weaponmodes" value="$weaponmodebackup"/>
+          <param name="debugchance" value="$debugchance"/>
+        </run_script>
+      </do_if>
     </actions>
   </attention>
   <!-- Runs when the script is aborted externally (player cancels/replaces the
@@ -437,13 +476,20 @@
   <on_abort>
     <do_if value="this.assignedcontrolled.subordinates.count gt 0">
       <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-        <do_if value="@$LocSub.order.id == 'MoveWait'">
+        <do_if value="@$LocSub.order.id == 'MoveWait' or @$LocSub.order.id == 'AttackInRange'">
           <cancel_order order="$LocSub.order"/>
         </do_if>
         <do_if value="@$LocSub.defaultorder.id == 'MoveWait'">
           <cancel_order order="$LocSub.defaultorder"/>
         </do_if>
       </do_for_each>
+    </do_if>
+    <do_if value="$weaponmodebackup? and $weaponmodebackup">
+      <run_script name="'lib.set.weaponmode'">
+        <param name="controllable" value="this.assignedcontrolled"/>
+        <param name="weaponmodes" value="$weaponmodebackup"/>
+        <param name="debugchance" value="$debugchance"/>
+      </run_script>
     </do_if>
   </on_abort>
 </aiscript>
