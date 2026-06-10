@@ -384,8 +384,17 @@
           <resume label="finish"/>
         </do_if>
 
-        <!-- Scan + dispatch. -->
+        <!-- Two-tier scan + dispatch. Trigger conditions for sub dispatch:
+               a) hostile within engagerange of the gate (transit threat)
+               b) hostile within engagerange of the leader itself
+                  — covers the case where the leader is mid-transit and
+                  getting attacked far from the gate; without this, subs
+                  sit at their slots while their commander is under fire.
+             Dispatch destination = leader's current position (not slot)
+             so subs converge on the actual fight. After engagement, subs
+             fall back to MoveWait default and return to their slots. -->
         <do_if value="this.assignedcontrolled.subordinates.count gt 0">
+          <set_value name="$LocBlockadeHostile" exact="null"/>
           <find_object name="$LocBlockadeHostile"
                        object="$target"
                        space="$targetsector"
@@ -393,12 +402,22 @@
                        relation="enemy"
                        class="class.ship"
                        multiple="false"/>
+          <do_if value="not $LocBlockadeHostile">
+            <find_object name="$LocBlockadeHostile"
+                         object="this.assignedcontrolled"
+                         space="$targetsector"
+                         max="$engagerange"
+                         relation="enemy"
+                         class="class.ship"
+                         multiple="false"/>
+          </do_if>
           <do_if value="$LocBlockadeHostile">
-            <debug_text text="'Blockade: hostile %s detected at gate, dispatching subs to engage.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
+            <create_position name="$LocRallyPos" space="$targetsector" object="this.assignedcontrolled"/>
+            <debug_text text="'Blockade: hostile %s detected, dispatching subs to leader pos.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
             <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
               <do_if value="@$LocSub.order.id == 'MoveWait'">
                 <create_order id="'AttackInRange'" object="$LocSub" default="false" immediate="true">
-                  <param name="destination" value="[$targetsector, $slotpos]"/>
+                  <param name="destination" value="[$targetsector, $LocRallyPos]"/>
                   <param name="radius" value="$engagerange"/>
                   <param name="pursuetargets" value="$pursuetargets"/>
                   <param name="enforceradius" value="true"/>
@@ -406,6 +425,7 @@
                 </create_order>
               </do_if>
             </do_for_each>
+            <remove_value name="$LocRallyPos"/>
           </do_if>
         </do_if>
 
