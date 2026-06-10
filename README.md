@@ -43,50 +43,19 @@ When the leader's order is replaced or cancelled, the cleanup pass cancels each 
 
 ## AI behavior
 
-Every 30 minutes (configurable in `md/blockade.xml`'s `VerifyVariables`), `EventBlockadeScan` walks every active gate in the galaxy via `find_gate active="true" space="player.galaxy"`. For each gate:
+Deployment is owned by X4's **job system**, not by MD spawn-cheating. `libraries/jobs.xml` adds, per major race (Argon, Paranid, Teladi, Split, Terran, Boron):
 
-- The **defender** is the sector-side owner (`$LocGate.sector.owner`); the **attacker** is the destination-side owner.
-- The pair must be actively hostile: `Defender.mayattack.{Attacker}` AND `Defender.relationto.{Attacker} le -0.25`.
-- Both must be real claimspace factions — the excluded list is `[xenon, khaak, yaki, scaleplate, player, civilian, criminal, smuggler, visitor]`. Anything in there on either side and the gate is skipped.
-- The defender must have at least one shipyard (`find_station_by_true_owner ... canbuildships="true"`).
-- No active blockade already on the gate. Two checks: (a) our own bookkeeping table (`$ActiveBlockades.{$LocGate}?`), and (b) a heuristic scan for any ship within 25 km of the gate whose current order is `Blockade` — this catches player-led blockades and blockades dispatched by other AI factions, so we don't pile multiple fleets onto the same gate.
+- `blockade_<race>_l` — the wing leader. L destroyer, runs the `Blockade` order. Built at the faction's own shipyards via `<environment buildatshipyard="true"/>` and `<location ... faction="<race>" relation="self"/>` so each faction only deploys these in its own claimspace.
+- `blockade_<race>_esc_m` — M frigate / corvette subordinate (`wing="3"`), runs `Escort` as default; once the leader's Blockade init enumerates its subordinates, MoveWait is dispatched to each at its slot.
+- `blockade_<race>_esc_s` — S heavy-fighter subordinate (`wing="4"`).
 
-When all of that passes, `EventDispatchBlockade` spawns a fleet at the defender's nearest shipyard: **1 destroyer + 3 frigates + 4 fighters** by default (configurable via `$MinFleetCapital` / `$MinFleetEscort` / `$MinFleetFighter`), race-matched to the defender's primary race (Argon / Paranid / Teladi / Split / Terran / Boron, falling back to Argon for unknowns). Each ship is given the `Blockade` order independently with its own `$slotindex`. They're peers — not subordinated to a wing leader — so each calculates its hemisphere slot from its index and flies there.
+Quotas: `galaxy="6" cluster="1"` per race — at most 6 blockade fleets across the galaxy per faction, and at most 1 per cluster. The job system queues these at shipyards over real time, respecting the faction's economy.
 
-A logbook entry under the News category announces the deployment (string `{20810, 400}` in `t/0001.xml`), gated by `$NewsEnabled`.
+The Blockade order's init (in `aiscripts/order.move.blockade.xml`) **auto-picks its target gate** when none was passed in — it scans the ship's current sector via `find_gate active="true"` and selects the first active gate whose destination owner is actively hostile to the ship's owner (`mayattack` AND `relationto ≤ -0.25`). Same hostile-pair test as the previous MD scan, but evaluated per-ship at spawn time instead of by a galaxy-wide MD timer.
 
-The same timer also runs `EventBlockadeMaintenance`, which checks each active blockade and disbands it (cancels the Blockade order on each surviving ship, removes the bookkeeping entry, writes a disband log entry) when:
+When the hostile relationship ends (relation thaws, owner change, gate destroyed), the order's interrupt handlers fire and the ship's Blockade order finishes naturally. The job system then decides on its next tick whether to re-queue a replacement based on the current claimspace state.
 
-- the gate or its destination no longer exists,
-- the destination sector flipped to the defender's faction (war was won),
-- relation has thawed (`Defender.relationto.{destination owner} gt -0.1`), or
-- all ships in the fleet have been destroyed.
-
-When an AI blockade is established or disbanded, a player logbook entry is written under the **News** category (gated by `$NewsEnabled`, default on). Uses vanilla `add_player_log` — no dependency on any external news framework.
-
-## Configuration
-
-Tunables live in `md/blockade.xml` under the `VerifyVariables` cue:
-
-```
-$Enable               master toggle                    (true)
-$ScanIntervalMin      minutes between scans            (30)
-$MinFleetCapital      destroyers per blockade          (1)
-$MinFleetEscort       frigates per blockade            (3)
-$MinFleetFighter      fighters per blockade            (4)
-$BlockadeDistance     order's distance param           (6km)
-$NewsEnabled          player logbook entries           (true)
-$DebugDetailed        per-event debug_text             (false)
-$ExcludedFactions     list of factions to skip
-```
-
-To change a tunable for an in-progress save, edit the value via the in-game debug console:
-
-```
-md.Blockade.$BBVarTable.$Enable = false
-```
-
-Restart required after editing the XML itself (X4 only re-parses MD scripts on full process launch).
+`md/blockade.xml` is now a thin state-table holder — the scan/dispatch cues that previously spawned ships were removed when jobs took over. Legacy save data is harmless (just unused entries).
 
 ## Files
 
@@ -96,17 +65,19 @@ blockades/
 ├── aiscripts/
 │   └── order.move.blockade.xml      the order definition + behavior loop
 ├── libraries/
-│   └── icons.xml                    map icon alias
+│   ├── icons.xml                    map icon alias (additive)
+│   └── jobs.xml                     blockade jobs (additive, per race)
 ├── md/
-│   └── blockade.xml                 AI auto-blockade scan + dispatch
+│   └── blockade.xml                 state-table holder (deployment owned by jobs.xml)
 ├── t/
 │   └── 0001.xml                     localization (page 20810)
 ├── scripts/
-│   └── publish.ps1                  Steam Workshop publish helper
+│   ├── publish.ps1                  Steam Workshop publish helper
+│   └── ...
 └── README.md
 ```
 
-No vanilla files are diffed. The mod is pure additions, so it doesn't conflict with anything.
+All diffs are additive (`<add>` selectors against vanilla `<jobs>` and `<icons>` roots) — no vanilla files are replaced. Conflicts with other mods are unlikely.
 
 ## Compatibility
 

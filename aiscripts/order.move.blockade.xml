@@ -68,6 +68,28 @@
          "Patrolling" label. Same pattern vanilla uses for protect.ship/station. -->
     <set_command command="command.protect" param="$target"/>
 
+    <!-- Auto-pick target gate when none was passed in (job-spawned ships
+         can't bake a specific gate into the job XML; vanilla job <order>
+         params only take static enums). Look at this ship's current
+         sector for an active gate whose destination owner is hostile to
+         the ship's owner — same hostile-pair test the MD scan used. If
+         multiple, the first match wins; the job's per-cluster quota
+         keeps deployment density reasonable. -->
+    <do_if value="(not $target or not $target.exists or not $target.isclass.gate) and this.ship.sector">
+      <find_gate name="$LocAutoGates" space="this.ship.sector" active="true" multiple="true"/>
+      <do_for_each name="$LocAutoG" in="$LocAutoGates">
+        <do_if value="(not $target) and $LocAutoG.exists and $LocAutoG.destination.exists
+                      and @$LocAutoG.destination.sector.owner
+                      and ($LocAutoG.destination.sector.owner != this.assignedcontrolled.owner)
+                      and this.assignedcontrolled.owner.mayattack.{$LocAutoG.destination.sector.owner}
+                      and (this.assignedcontrolled.owner.relationto.{$LocAutoG.destination.sector.owner} le -0.25)">
+          <set_value name="$target" exact="$LocAutoG"/>
+          <debug_text text="'Blockade: auto-picked gate %s in %s.'.[$target.knownname, this.ship.sector.knownname]" chance="$debugchance"/>
+        </do_if>
+      </do_for_each>
+      <remove_value name="$LocAutoGates"/>
+    </do_if>
+
     <!-- Validate target -->
     <do_if value="not $target or not $target.exists or not $target.isclass.gate">
       <debug_text text="'Blockade: invalid target. Aborting.'" filter="error"/>

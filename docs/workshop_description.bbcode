@@ -31,11 +31,11 @@ Use an [b]L (destroyer)[/b] or [b]M (frigate / corvette)[/b] as the wing leader.
 [/list]
 
 [h2]AI auto-blockade[/h2]
-Every 30 minutes (configurable), the mod walks every active gate in the galaxy and looks at the sector owner on each side. If the two owners are actively hostile (relation ≤ -0.25 and the engine flags them as may-attack) and both are real claimspace factions (Xenon, Khaak, Yaki, Scaleplate, Civilian/Criminal/Smuggler/Visitor sub-factions, and the player are skipped), the sector-side owner — the [i]defender[/i] — is considered as a possible blockade owner.
+Deployment is handled by X4's [b]job system[/b]. The mod adds per-race blockade jobs (Argon, Paranid, Teladi, Split, Terran, Boron): one [b]L destroyer leader[/b] running the Blockade order, with 3 M frigate / corvette subordinates and 4 S heavy-fighter subordinates per wing. The faction's own economy queues these at its shipyards over real time, respecting build queues and resources — no instant spawning.
 
-If the defender has at least one shipyard, no blockade fleet (ours or anyone else's, including the player's, within 25 km of the gate) is already on this gate, [b]and we haven't already dispatched a blockade there in a prior tick[/b], the mod spawns a small force at that shipyard: by default [b]1 destroyer + 3 frigates + 4 fighters[/b], race-matched to the defender (Argon, Paranid, Teladi, Split, Terran, Boron, falling back to Argon for unknown races). Each of those ships is independently assigned the [b]Blockade[/b] order with its own slot index, so the group ends up arranged in the same hemisphere formation the player would see — but as peers running the order, not under a wing leader.
+Quotas: up to 6 blockade fleets per faction galaxy-wide, max 1 per cluster.
 
-A logbook entry under the News category announces the deployment. The mod re-checks each active blockade every 30 minutes and disbands it (cancels the Blockade order on surviving ships, removes the bookkeeping entry, and writes a disband log entry) when any of the following becomes true: the gate or its destination no longer exists, the destination sector flipped to the defender's faction (war was won), relation between the two has thawed (> -0.1), or all ships in the fleet have been destroyed.
+When a blockade-leader spawns and has no explicit gate target, it [b]auto-picks[/b] one from its current sector — the first active gate whose destination owner is actively hostile (relation ≤ -0.25 and engine flags them as may-attack). The ship then flies its escorts to the hemisphere formation around that gate. When the hostile relationship ends (relation thaws, gate destroyed, owner flips), the order finishes naturally and the job system decides on its next tick whether to queue a replacement based on the current claimspace state.
 
 [h2]Compatibility[/h2]
 [list]

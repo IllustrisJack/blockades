@@ -1,0 +1,481 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Blockade jobs. Faction economy builds these at its shipyards over time
+  (real wares, real build queue) rather than the MD spawn-cheat.
+
+  Each race has three jobs:
+    - blockade_<race>_l       : leader (L destroyer). Runs the Blockade order.
+                                Auto-picks a hostile-facing gate in its sector
+                                via the target-auto-pick in
+                                aiscripts/order.move.blockade.xml init.
+    - blockade_<race>_esc_m   : M frigate escort. Subordinate to the leader,
+                                runs Escort by default. The leader's Blockade
+                                init dispatches MoveWait to it once attached.
+    - blockade_<race>_esc_s   : S heavy fighter escort. Same pattern.
+
+  Quotas: 6 leaders galaxy-wide per race, 1 per cluster. Each leader brings
+  3 frigates + 4 fighters via wing quota. Numbers match the MD default counts
+  ($MinFleetCapital=1, $MinFleetEscort=3, $MinFleetFighter=4) but spread
+  across the galaxy by the job system, not all at once at one shipyard.
+
+  Shape mirrors vanilla argon_destroyer_patrol_l_sector + argon_frigate_escort_m
+  + argon_fighter_escort_s_frigate. Per the X4 9.0 jobs gotcha (see
+  ../../deadair_scripts/docs/md_9.0_gotchas.md), X4 silently rejects jobs with
+  attributes outside the vanilla shape, so this file matches vanilla
+  attribute-for-attribute.
+-->
+<diff>
+  <add sel="//jobs">
+
+    <!-- ============ Argon ============ -->
+    <job id="blockade_arg_l" name="{20810, 100}" friendgroup="argon_factionlogic" comment="Blockade defender capital. Auto-picks hostile-facing gate in own sector.">
+      <modifiers commandeerable="true"/>
+      <orders>
+        <order order="Blockade" default="true"/>
+      </orders>
+      <category faction="argon" tags="[factionlogic, military, destroyer]" size="ship_l"/>
+      <quota galaxy="6" cluster="1"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro" faction="argon" relation="self" comparison="exact"/>
+      <environment buildatshipyard="true"/>
+      <ship>
+        <select faction="argon" tags="[military, destroyer]" size="ship_l"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="argon" overridenpc="true"/>
+      </ship>
+      <subordinates>
+        <subordinate job="blockade_arg_esc_m"/>
+        <subordinate job="blockade_arg_esc_s"/>
+      </subordinates>
+    </job>
+
+    <job id="blockade_arg_esc_m" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.dartvertical"/>
+          <param name="formationparam" value="2500m"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="argon" tags="[military]" size="ship_m"/>
+      <quota wing="3"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="argon" tags="[military, medium]" size="ship_m"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="argon" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <job id="blockade_arg_esc_s" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.pointguard"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="argon" tags="[military, fighter]" size="ship_s"/>
+      <quota wing="4"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="argon" tags="[military, fighter]" size="ship_s"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="argon" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <!-- ============ Paranid (Holy Order) ============ -->
+    <job id="blockade_par_l" name="{20810, 100}" friendgroup="paranid_factionlogic" comment="Blockade defender capital. Auto-picks hostile-facing gate in own sector.">
+      <modifiers commandeerable="true"/>
+      <orders>
+        <order order="Blockade" default="true"/>
+      </orders>
+      <category faction="paranid" tags="[factionlogic, military, destroyer]" size="ship_l"/>
+      <quota galaxy="6" cluster="1"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro" faction="paranid" relation="self" comparison="exact"/>
+      <environment buildatshipyard="true"/>
+      <ship>
+        <select faction="paranid" tags="[military, destroyer]" size="ship_l"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="paranid" overridenpc="true"/>
+      </ship>
+      <subordinates>
+        <subordinate job="blockade_par_esc_m"/>
+        <subordinate job="blockade_par_esc_s"/>
+      </subordinates>
+    </job>
+
+    <job id="blockade_par_esc_m" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.dartvertical"/>
+          <param name="formationparam" value="2500m"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="paranid" tags="[military]" size="ship_m"/>
+      <quota wing="3"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="paranid" tags="[military, medium]" size="ship_m"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="paranid" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <job id="blockade_par_esc_s" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.pointguard"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="paranid" tags="[military, fighter]" size="ship_s"/>
+      <quota wing="4"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="paranid" tags="[military, fighter]" size="ship_s"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="paranid" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <!-- ============ Teladi ============ -->
+    <job id="blockade_tel_l" name="{20810, 100}" friendgroup="teladi_factionlogic" comment="Blockade defender capital. Auto-picks hostile-facing gate in own sector.">
+      <modifiers commandeerable="true"/>
+      <orders>
+        <order order="Blockade" default="true"/>
+      </orders>
+      <category faction="teladi" tags="[factionlogic, military, destroyer]" size="ship_l"/>
+      <quota galaxy="6" cluster="1"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro" faction="teladi" relation="self" comparison="exact"/>
+      <environment buildatshipyard="true"/>
+      <ship>
+        <select faction="teladi" tags="[military, destroyer]" size="ship_l"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="teladi" overridenpc="true"/>
+      </ship>
+      <subordinates>
+        <subordinate job="blockade_tel_esc_m"/>
+        <subordinate job="blockade_tel_esc_s"/>
+      </subordinates>
+    </job>
+
+    <job id="blockade_tel_esc_m" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.dartvertical"/>
+          <param name="formationparam" value="2500m"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="teladi" tags="[military]" size="ship_m"/>
+      <quota wing="3"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="teladi" tags="[military, medium]" size="ship_m"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="teladi" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <job id="blockade_tel_esc_s" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.pointguard"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="teladi" tags="[military, fighter]" size="ship_s"/>
+      <quota wing="4"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="teladi" tags="[military, fighter]" size="ship_s"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="teladi" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <!-- ============ Split ============ -->
+    <job id="blockade_spl_l" name="{20810, 100}" friendgroup="split_factionlogic" comment="Blockade defender capital. Auto-picks hostile-facing gate in own sector.">
+      <modifiers commandeerable="true"/>
+      <orders>
+        <order order="Blockade" default="true"/>
+      </orders>
+      <category faction="split" tags="[factionlogic, military, destroyer]" size="ship_l"/>
+      <quota galaxy="6" cluster="1"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro" faction="split" relation="self" comparison="exact"/>
+      <environment buildatshipyard="true"/>
+      <ship>
+        <select faction="split" tags="[military, destroyer]" size="ship_l"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="split" overridenpc="true"/>
+      </ship>
+      <subordinates>
+        <subordinate job="blockade_spl_esc_m"/>
+        <subordinate job="blockade_spl_esc_s"/>
+      </subordinates>
+    </job>
+
+    <job id="blockade_spl_esc_m" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.dartvertical"/>
+          <param name="formationparam" value="2500m"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="split" tags="[military]" size="ship_m"/>
+      <quota wing="3"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="split" tags="[military, medium]" size="ship_m"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="split" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <job id="blockade_spl_esc_s" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.pointguard"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="split" tags="[military, fighter]" size="ship_s"/>
+      <quota wing="4"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="split" tags="[military, fighter]" size="ship_s"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="split" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <!-- ============ Terran ============ -->
+    <job id="blockade_ter_l" name="{20810, 100}" friendgroup="terran_factionlogic" comment="Blockade defender capital. Auto-picks hostile-facing gate in own sector.">
+      <modifiers commandeerable="true"/>
+      <orders>
+        <order order="Blockade" default="true"/>
+      </orders>
+      <category faction="terran" tags="[factionlogic, military, destroyer]" size="ship_l"/>
+      <quota galaxy="6" cluster="1"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro" faction="terran" relation="self" comparison="exact"/>
+      <environment buildatshipyard="true"/>
+      <ship>
+        <select faction="terran" tags="[military, destroyer]" size="ship_l"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="terran" overridenpc="true"/>
+      </ship>
+      <subordinates>
+        <subordinate job="blockade_ter_esc_m"/>
+        <subordinate job="blockade_ter_esc_s"/>
+      </subordinates>
+    </job>
+
+    <job id="blockade_ter_esc_m" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.dartvertical"/>
+          <param name="formationparam" value="2500m"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="terran" tags="[military]" size="ship_m"/>
+      <quota wing="3"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="terran" tags="[military, medium]" size="ship_m"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="terran" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <job id="blockade_ter_esc_s" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.pointguard"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="terran" tags="[military, fighter]" size="ship_s"/>
+      <quota wing="4"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="terran" tags="[military, fighter]" size="ship_s"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="terran" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <!-- ============ Boron ============ -->
+    <job id="blockade_bor_l" name="{20810, 100}" friendgroup="boron_factionlogic" comment="Blockade defender capital. Auto-picks hostile-facing gate in own sector.">
+      <modifiers commandeerable="true"/>
+      <orders>
+        <order order="Blockade" default="true"/>
+      </orders>
+      <category faction="boron" tags="[factionlogic, military, destroyer]" size="ship_l"/>
+      <quota galaxy="6" cluster="1"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro" faction="boron" relation="self" comparison="exact"/>
+      <environment buildatshipyard="true"/>
+      <ship>
+        <select faction="boron" tags="[military, destroyer]" size="ship_l"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="boron" overridenpc="true"/>
+      </ship>
+      <subordinates>
+        <subordinate job="blockade_bor_esc_m"/>
+        <subordinate job="blockade_bor_esc_s"/>
+      </subordinates>
+    </job>
+
+    <job id="blockade_bor_esc_m" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.dartvertical"/>
+          <param name="formationparam" value="2500m"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="boron" tags="[military]" size="ship_m"/>
+      <quota wing="3"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="boron" tags="[military, medium]" size="ship_m"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="boron" overridenpc="true"/>
+      </ship>
+    </job>
+
+    <job id="blockade_bor_esc_s" name="{20810, 100}" startactive="false">
+      <orders>
+        <order order="Escort" default="true">
+          <param name="formation" value="formationshape.pointguard"/>
+          <param name="overrideformationskill" value="true"/>
+        </order>
+      </orders>
+      <category faction="boron" tags="[military, fighter]" size="ship_s"/>
+      <quota wing="4"/>
+      <location class="galaxy" macro="xu_ep2_universe_macro"/>
+      <environment buildatshipyard="true"/>
+      <modifiers subordinate="true"/>
+      <ship>
+        <select faction="boron" tags="[military, fighter]" size="ship_s"/>
+        <loadout>
+          <quantity exact="1.0"/>
+          <quality exact="0.85">
+            <variation exact="0.15"/>
+          </quality>
+        </loadout>
+        <owner exact="boron" overridenpc="true"/>
+      </ship>
+    </job>
+
+  </add>
+</diff>
