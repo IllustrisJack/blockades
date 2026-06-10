@@ -354,27 +354,63 @@
 
       <label name="start"/>
 
-      <!-- Unified hold loop. No blocking initial move.generic — that pattern
-           left subordinates idle until the leader arrived because the
-           script was stuck inside run_script for the entire transit. Now
-           every iteration scans + dispatches first, then moves OR rotates
-           with bounded time. Scan latency is ~5-10s during transit, ~10-20s
-           when settled.
+      <!-- Architecture (vanilla-aligned per md_9.0_gotchas + agent analysis
+           of order.move.wait.xml / order.fight.protect.position.xml):
 
-           In-transit branch (slotdist > $arrivaltol) uses the <move_to>
-           XML primitive with finishonapproach + interrupt_after_time so the
-           loop yields back to scan every few seconds while the ship steers
-           toward slot. <rotation> is applied throughout so facing converges
-           continuously rather than only after arrival.
+           1. Run move.generic ONCE here, before the hold loop. Polling
+              move.generic on every loop iteration was the "circling" bug
+              — each call re-evaluates safepos, the engine engages thrust
+              to "start" the move, then realizes it's already there. The
+              ship visibly wobbles. Sub dispatches via vanilla MoveWait
+              work cleanly because MoveWait calls move.generic exactly
+              once per dispatch.
 
-           Once in slot ($wasintransit transition), set_order_syncpoint_reached
-           fires once. Subsequent iterations do rotation-only refinement
-           plus a longer wait. Hysteresis on exit ($exittol = 2 * arrivaltol)
-           prevents oscillation on the threshold edge. -->
-      <set_value name="$wasintransit" exact="true"/>
-      <set_value name="$synced" exact="false"/>
+           2. After arrival: stop_moving + stop_boost + standingby + one-
+              shot set_order_syncpoint_reached, mirroring the MoveWait
+              tail (order.move.wait.xml:283-301).
+
+           3. Then enter the hold loop which is pure scan/dispatch +
+              rotation refinement. NO move.generic re-fires unless drift
+              exceeds $exittol (a re-transit), in which case we resume
+              to label start and rerun this whole block.
+
+           Defaults match vanilla MoveWait: precise/playerprecise omitted
+           (both default false). The earlier playerprecise=true degraded
+           large-hull safepos selection. -->
+
+      <do_if value="not $target.exists or not $target.isclass.gate">
+        <resume label="finish"/>
+      </do_if>
+
+      <do_if value="$lookaway">
+        <create_position name="$LocLeaderLookat" space="$targetsector" object="this.ship"/>
+      </do_if>
+      <do_else>
+        <create_position name="$LocLeaderLookat" space="$targetsector" object="$target"/>
+      </do_else>
+
       <set_command_action commandaction="commandaction.flyingto" param="$target"/>
+      <run_script name="'move.generic'" result="$movesuccess">
+        <param name="destination" value="$targetsector"/>
+        <param name="position" value="$slotpos"/>
+        <param name="lookat" value="$LocLeaderLookat"/>
+        <param name="recallsubordinates" value="false"/>
+        <param name="debugchance" value="$debugchance"/>
+      </run_script>
+      <stop_moving object="this.ship"/>
+      <stop_boost object="this.ship"/>
+      <set_command command="command.wait"/>
+      <set_command_action commandaction="commandaction.standingby"/>
+      <remove_value name="$LocLeaderLookat"/>
 
+      <do_if value="not $synced?">
+        <set_order_syncpoint_reached order="this.ship.order"/>
+        <set_value name="$synced" exact="true"/>
+      </do_if>
+
+      <!-- Hold loop: scan + dispatch + rotation refinement only. No
+           movement re-fires. Drift check at the bottom; if knocked
+           materially off slot, resume to start and re-run move.generic. -->
       <do_while value="$target.exists">
         <do_if value="not $target.exists or not $target.isclass.gate">
           <resume label="finish"/>
@@ -385,7 +421,7 @@
 
         <!-- Two-tier scan + dispatch (gate vicinity → leader vicinity).
              Rally destination = leader's current position so subs converge
-             on the fight, wherever it is. -->
+             on the actual fight. -->
         <do_if value="this.assignedcontrolled.subordinates.count gt 0">
           <set_value name="$LocBlockadeHostile" exact="null"/>
           <find_object name="$LocBlockadeHostile"
@@ -422,8 +458,10 @@
           </do_if>
         </do_if>
 
-        <!-- Compute desired facing once per iteration. Used by both
-             branches so rotation refinement is continuous. -->
+        <!-- Rotation-only refinement at slot. forceposition=true + current
+             ship position pins translation; forcerotation=true converges
+             facing on $LocFaceRot. Short interrupt so the next scan
+             iteration fires promptly. -->
         <do_if value="$lookaway">
           <create_orientation name="$LocFaceRot" orientation="look_away" refobject="$target">
             <position object="this.ship"/>
@@ -434,87 +472,24 @@
             <position object="this.ship"/>
           </create_orientation>
         </do_else>
-
-        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-
-        <!-- State transition: at-slot → in-transit (drift exceeded $exittol)
-             vs in-transit → at-slot (entered $arrivaltol). -->
-        <do_if value="$wasintransit and ($slotdist le $arrivaltol)">
-          <set_value name="$wasintransit" exact="false"/>
-          <stop_moving object="this.ship"/>
-          <set_command_action commandaction="commandaction.standingby"/>
-          <do_if value="not $synced">
-            <set_order_syncpoint_reached order="this.ship.order"/>
-            <set_value name="$synced" exact="true"/>
-          </do_if>
-        </do_if>
-        <do_elseif value="(not $wasintransit) and ($slotdist gt $exittol)">
-          <set_value name="$wasintransit" exact="true"/>
-          <set_command_action commandaction="commandaction.flyingto" param="$target"/>
-        </do_elseif>
-
-        <do_if value="$wasintransit">
-          <!-- In-transit: use move.generic exactly the way vanilla MoveWait
-               does for subordinates — same script, same param shape, same
-               precise=default (false). Earlier we had precise=true which
-               skips safepos and tries to nail the exact point; for XL
-               hulls near a gate that fights pathing and the ship stops
-               kilometres away from slot. Drop it and let move.generic
-               pick a safepos near $slotpos. After move.generic returns,
-               stop_moving + stop_boost matches the MoveWait cleanup.
-
-               lookat is a fresh position object created in $targetsector
-               relative to the gate (or relative to the ship's current
-               position for $lookaway), mirroring how the sub dispatch
-               builds $LocLookatPos. move.generic handles the rotation
-               to lookat on arrival. -->
-          <do_if value="$lookaway">
-            <create_position name="$LocLeaderLookat" space="$targetsector" object="this.ship"/>
-          </do_if>
-          <do_else>
-            <create_position name="$LocLeaderLookat" space="$targetsector" object="$target"/>
-          </do_else>
-          <!-- playerprecise=true: skips position randomization (so re-runs
-               land on the same safepos every time) but keeps safepos
-               selection so we don't fight pathing the way precise=true
-               did. Without this, each iteration's move.generic picks a
-               different randomized point near slot and the leader
-               oscillates between them forever. -->
-          <run_script name="'move.generic'" result="$movesuccess">
-            <param name="destination" value="$targetsector"/>
-            <param name="position" value="$slotpos"/>
-            <param name="lookat" value="$LocLeaderLookat"/>
-            <param name="playerprecise" value="true"/>
-            <param name="recallsubordinates" value="false"/>
-            <param name="debugchance" value="$debugchance"/>
-          </run_script>
-          <stop_moving object="this.ship"/>
-          <stop_boost object="this.ship"/>
-          <remove_value name="$LocLeaderLookat"/>
-        </do_if>
-        <do_else>
-          <!-- At-slot: rotate-in-place. forceposition=true with current
-               position pins translation, forcerotation=true converges
-               facing on $LocFaceRot. Short interrupt — facing converges
-               fast and scan needs to keep firing. -->
-          <move_to object="this.ship" destination="$targetsector"
-                   forcerotation="true" forceposition="true" commandaction="false">
-            <position object="this.ship"/>
-            <rotation value="$LocFaceRot"/>
-            <interrupt_after_time time="3s"/>
-          </move_to>
-        </do_else>
-
+        <move_to object="this.ship" destination="$targetsector"
+                 forcerotation="true" forceposition="true" commandaction="false">
+          <position object="this.ship"/>
+          <rotation value="$LocFaceRot"/>
+          <interrupt_after_time time="3s"/>
+        </move_to>
         <remove_value name="$LocFaceRot"/>
 
-        <!-- Pacing. Tighter while in transit so scan reacts quickly to a
-             developing fight; relaxed once settled. -->
-        <do_if value="$wasintransit">
-          <wait min="2s" max="5s"/>
+        <!-- Drift detection — only re-transit if ship was knocked WAY off
+             slot (weapon impulse, mass-traffic shove). $exittol is the
+             generous threshold from init. Smaller drift accepted. -->
+        <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+        <do_if value="$slotdist gt $exittol">
+          <debug_text text="'Blockade: drifted %sm off slot (>%sm), re-transit.'.[($slotdist)i, ($exittol)i]" chance="$debugchance"/>
+          <resume label="start"/>
         </do_if>
-        <do_else>
-          <wait min="10s" max="20s"/>
-        </do_else>
+
+        <wait min="10s" max="20s"/>
       </do_while>
 
       <label name="finish"/>
