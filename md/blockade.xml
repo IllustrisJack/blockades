@@ -55,5 +55,114 @@
 			</actions>
 		</cue>
 
+		<!-- Orphan reaper. When a blockade leader (job blockade_<race>_l) is
+		     destroyed, its M/S escort subordinates (wing="3"/"4" jobs) lose
+		     their commander. Vanilla TargetInvalidHandler aborts their
+		     Escort order on the dead target, but the default order (also
+		     Escort) re-fires against the same dead target — so the ship
+		     floats idle in a tight abort/retry loop, not despawned but not
+		     useful either.
+
+		     This cue periodically finds those orphans and re-tasks them:
+
+		       1. Same-cluster surviving blockade leader of the same faction:
+		          re-attach via set_object_commander + cancel current order.
+		          The orphan's default Escort then picks up the new
+		          commander and the ship joins the surviving wing.
+
+		       2. Otherwise: MoveWait to nearest faction shipyard. Ship
+		          becomes idle but reachable for resupply or future
+		          reassignment by vanilla faction logic.
+
+		     Detection is by job id (exact match against the 12 escort job
+		     ids we define in libraries/jobs.xml). Cheap because we scope
+		     find_ship to one faction at a time. -->
+		<cue name="TimerBlockadeReap" instantiate="true" checkinterval="5min" checktime="1min">
+			<conditions/>
+			<actions>
+				<signal_cue_instantly cue="EventBlockadeReap"/>
+			</actions>
+		</cue>
+
+		<cue name="EventBlockadeReap" instantiate="true">
+			<conditions>
+				<event_cue_signalled/>
+			</conditions>
+			<actions>
+				<set_value name="$BBVT" exact="md.$BBVarTable"/>
+				<set_value name="$LocFactions" exact="[faction.argon, faction.paranid, faction.teladi, faction.split, faction.terran, faction.boron]"/>
+				<set_value name="$LocLeaderJobIds" exact="['blockade_arg_l', 'blockade_par_l', 'blockade_tel_l', 'blockade_spl_l', 'blockade_ter_l', 'blockade_bor_l']"/>
+
+				<do_for_each name="$LocFaction" in="$LocFactions">
+					<find_ship name="$LocShips" space="player.galaxy" multiple="true" faction="$LocFaction"/>
+					<do_for_each name="$LocSh" in="$LocShips">
+						<do_if value="@$LocSh.job
+						              and (@$LocSh.job.id == 'blockade_arg_esc_m' or @$LocSh.job.id == 'blockade_arg_esc_s'
+						                or @$LocSh.job.id == 'blockade_par_esc_m' or @$LocSh.job.id == 'blockade_par_esc_s'
+						                or @$LocSh.job.id == 'blockade_tel_esc_m' or @$LocSh.job.id == 'blockade_tel_esc_s'
+						                or @$LocSh.job.id == 'blockade_spl_esc_m' or @$LocSh.job.id == 'blockade_spl_esc_s'
+						                or @$LocSh.job.id == 'blockade_ter_esc_m' or @$LocSh.job.id == 'blockade_ter_esc_s'
+						                or @$LocSh.job.id == 'blockade_bor_esc_m' or @$LocSh.job.id == 'blockade_bor_esc_s')
+						              and (not @$LocSh.commander.exists)">
+
+							<!-- Orphan. Hunt for a surviving leader in the same cluster. -->
+							<set_value name="$LocNewLeader" exact="null"/>
+							<do_for_each name="$LocClSect" in="$LocSh.sector.cluster.sectors">
+								<do_if value="$LocNewLeader == null">
+									<find_ship name="$LocClShips" space="$LocClSect" multiple="true" faction="$LocFaction"/>
+									<do_for_each name="$LocCSh" in="$LocClShips">
+										<do_if value="$LocNewLeader == null
+										              and $LocCSh.exists
+										              and @$LocCSh.job
+										              and ($LocLeaderJobIds.indexof.{$LocCSh.job.id} gt 0)">
+											<set_value name="$LocNewLeader" exact="$LocCSh"/>
+										</do_if>
+									</do_for_each>
+									<remove_value name="$LocClShips"/>
+								</do_if>
+							</do_for_each>
+
+							<do_if value="$LocNewLeader">
+								<!-- Re-attach. Subgroup 1 for M escorts, 2 for S escorts.
+								     Then cancel the (invalid-target) Escort order; default
+								     Escort re-fires picking up the new commander. -->
+								<set_value name="$LocSubgroup" exact="if $LocSh.isclass.ship_s then 2 else 1"/>
+								<set_object_commander object="$LocSh" commander="$LocNewLeader" subordinategroupid="$LocSubgroup"/>
+								<do_if value="@$LocSh.order">
+									<cancel_order order="$LocSh.order"/>
+								</do_if>
+								<do_if value="$BBVT.$DebugDetailed">
+									<debug_text text="'BB: orphan %s re-attached to %s in %s.'.[$LocSh.knownname, $LocNewLeader.knownname, $LocSh.sector.cluster.knownname]" filter="general"/>
+								</do_if>
+							</do_if>
+							<do_else>
+								<!-- No surviving leader in cluster. Send to nearest
+								     faction shipyard via MoveWait. Ship lives, becomes
+								     idle but reachable. -->
+								<find_station_by_true_owner name="$LocSY" faction="$LocFaction" space="player.galaxy" canbuildships="true"/>
+								<do_if value="$LocSY">
+									<create_order id="'MoveWait'" object="$LocSh" immediate="true">
+										<param name="destination" value="[$LocSY.sector, $LocSY]"/>
+										<param name="recallsubordinates" value="false"/>
+									</create_order>
+									<do_if value="$BBVT.$DebugDetailed">
+										<debug_text text="'BB: orphan %s sent to shipyard %s (no leader in %s).'.[$LocSh.knownname, $LocSY.knownname, $LocSh.sector.cluster.knownname]" filter="general"/>
+									</do_if>
+								</do_if>
+								<remove_value name="$LocSY"/>
+							</do_else>
+
+							<remove_value name="$LocNewLeader"/>
+							<remove_value name="$LocSubgroup"/>
+						</do_if>
+					</do_for_each>
+					<remove_value name="$LocShips"/>
+				</do_for_each>
+
+				<remove_value name="$LocFactions"/>
+				<remove_value name="$LocLeaderJobIds"/>
+			</actions>
+		</cue>
+
 	</cues>
 </mdscript>
