@@ -451,6 +451,22 @@
         <do_if value="$timeout and (player.age ge $inittime + $timeout)">
           <resume label="finish"/>
         </do_if>
+        <!-- Hostility reality-check. The order was launched against a
+             hostile destination, but state can shift mid-blockade: the
+             destination sector flipped to our own faction (war won),
+             the destination owner flipped to a friendly faction (war
+             ended), or the destination simply became friendly via
+             Dynamic War / diplomacy. In any of those, the blockade no
+             longer makes sense — finish cleanly so the job system can
+             re-task the ship to a current hostile-facing gate. -->
+        <do_if value="not @$target.destination.exists
+                      or not @$target.destination.sector.owner
+                      or ($target.destination.sector.owner == this.assignedcontrolled.owner)
+                      or (not this.assignedcontrolled.owner.mayattack.{$target.destination.sector.owner})
+                      or (this.assignedcontrolled.owner.relationto.{$target.destination.sector.owner} gt -0.1)">
+          <debug_text text="'Blockade: %s — target no longer hostile, finishing (dest=%s, dest.owner=%s).'.[$target.knownname, @$target.destination, @$target.destination.sector.owner]" filter="general"/>
+          <resume label="finish"/>
+        </do_if>
 
         <!-- Two-tier scan + dispatch (gate vicinity → leader vicinity).
              Rally destination = leader's current position so subs converge

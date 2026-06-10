@@ -55,6 +55,102 @@
 			</actions>
 		</cue>
 
+		<!-- Coverage audit. Runs on the same 5-min cadence as the orphan
+		     reaper. Two passes:
+
+		       1. Walk every blockade leader (jobs blockade_<race>_l) and
+		          verify its current state — leader exists, has an active
+		          Blockade order, target gate is still hostile-facing. The
+		          aiscript-side check already finishes the order on
+		          hostility loss, but this MD pass catches drift between
+		          ticks and logs each leader's gate + escort count so a
+		          coverage map is readable from the log.
+
+		       2. Walk every active hostile-facing gate per major faction
+		          and check whether ANY ship with order='Blockade' is
+		          within 25 km of it. Gates with no coverage get logged
+		          as gaps. Informational only — quota=cluster=1 in
+		          jobs.xml is the deployment policy and we don't override
+		          it here, but the gap log lets the user / dev see which
+		          gates are open versus held.
+
+		     Logs at filter='general'. Per-gate volume tops out at
+		     ~30 active major-faction gates galaxy-wide, so this is cheap. -->
+		<cue name="TimerBlockadeAudit" instantiate="true" checkinterval="5min" checktime="3min">
+			<conditions/>
+			<actions>
+				<signal_cue_instantly cue="EventBlockadeAudit"/>
+			</actions>
+		</cue>
+
+		<cue name="EventBlockadeAudit" instantiate="true">
+			<conditions>
+				<event_cue_signalled/>
+			</conditions>
+			<actions>
+				<set_value name="$BBVT" exact="md.$BBVarTable"/>
+				<set_value name="$LocFactions" exact="[faction.argon, faction.paranid, faction.teladi, faction.split, faction.terran, faction.boron]"/>
+				<set_value name="$LocLeaderJobIds" exact="['blockade_arg_l', 'blockade_par_l', 'blockade_tel_l', 'blockade_spl_l', 'blockade_ter_l', 'blockade_bor_l']"/>
+
+				<!-- Pass 1: leader audit. -->
+				<set_value name="$LocLeaderCount" exact="0"/>
+				<do_for_each name="$LocAFaction" in="$LocFactions">
+					<find_ship name="$LocAShips" space="player.galaxy" multiple="true" faction="$LocAFaction"/>
+					<do_for_each name="$LocASh" in="$LocAShips">
+						<do_if value="@$LocASh.job and ($LocLeaderJobIds.indexof.{$LocASh.job.id} gt 0)">
+							<set_value name="$LocLeaderCount" exact="$LocLeaderCount + 1"/>
+							<set_value name="$LocAOrderId" exact="@$LocASh.order.id"/>
+							<set_value name="$LocASubs" exact="if @$LocASh.subordinates then $LocASh.subordinates.count else 0"/>
+							<debug_text text="'BB: audit leader %s (%s, %s subs) order=%s sector=%s'.[$LocASh.knownname, $LocAFaction.shortname, $LocASubs, @$LocAOrderId, @$LocASh.sector.knownname]" filter="general"/>
+							<!-- Zombie check: leader has no Blockade order AND no Patrol/Idle. The aiscript-side hostility check should finish a stale Blockade and let the faction logic re-task; if we see a leader still holding job blockade_*_l but in some weird stuck state, flag it. -->
+							<do_if value="@$LocAOrderId and ($LocAOrderId != 'Blockade')">
+								<debug_text text="'BB: audit WARN leader %s job %s but current order is %s.'.[$LocASh.knownname, $LocASh.job.id, $LocAOrderId]" filter="general"/>
+							</do_if>
+						</do_if>
+					</do_for_each>
+					<remove_value name="$LocAShips"/>
+				</do_for_each>
+
+				<!-- Pass 2: gate coverage. -->
+				<set_value name="$LocAGateCount" exact="0"/>
+				<set_value name="$LocAGateCovered" exact="0"/>
+				<find_gate name="$LocAGates" space="player.galaxy" active="true" multiple="true"/>
+				<do_for_each name="$LocAG" in="$LocAGates">
+					<do_if value="$LocAG.exists
+					              and @$LocAG.destination.exists
+					              and @$LocAG.sector.owner
+					              and @$LocAG.destination.sector.owner
+					              and ($LocFactions.indexof.{$LocAG.sector.owner} gt 0)
+					              and ($LocAG.sector.owner != $LocAG.destination.sector.owner)
+					              and $LocAG.sector.owner.mayattack.{$LocAG.destination.sector.owner}
+					              and ($LocAG.sector.owner.relationto.{$LocAG.destination.sector.owner} le -0.25)">
+						<set_value name="$LocAGateCount" exact="$LocAGateCount + 1"/>
+						<!-- Is there a Blockade-ordered ship of the defender within 25 km? -->
+						<set_value name="$LocAGCov" exact="false"/>
+						<find_ship name="$LocAGShips" space="$LocAG.sector" multiple="true" faction="$LocAG.sector.owner"/>
+						<do_for_each name="$LocAGSh" in="$LocAGShips">
+							<do_if value="(not $LocAGCov) and (@$LocAGSh.order.id == 'Blockade') and ($LocAGSh.distanceto.{$LocAG} lt 25km)">
+								<set_value name="$LocAGCov" exact="true"/>
+							</do_if>
+						</do_for_each>
+						<remove_value name="$LocAGShips"/>
+						<do_if value="$LocAGCov">
+							<set_value name="$LocAGateCovered" exact="$LocAGateCovered + 1"/>
+						</do_if>
+						<do_else>
+							<debug_text text="'BB: audit GAP — %s gate from %s to %s has no blockade coverage.'.[$LocAG.sector.knownname, $LocAG.sector.owner.shortname, $LocAG.destination.sector.owner.shortname]" filter="general"/>
+						</do_else>
+					</do_if>
+				</do_for_each>
+				<remove_value name="$LocAGates"/>
+
+				<debug_text text="'BB: audit summary — %s active blockade leader(s), %s of %s hostile-facing gates covered.'.[$LocLeaderCount, $LocAGateCovered, $LocAGateCount]" filter="general"/>
+
+				<remove_value name="$LocFactions"/>
+				<remove_value name="$LocLeaderJobIds"/>
+			</actions>
+		</cue>
+
 		<!-- Orphan reaper. When a blockade leader (job blockade_<race>_l) is
 		     destroyed, its M/S escort subordinates (wing="3"/"4" jobs) lose
 		     their commander. Vanilla TargetInvalidHandler aborts their
