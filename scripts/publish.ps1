@@ -127,10 +127,10 @@ Write-Host "Mod path:     $ModPath" -ForegroundColor DarkGray
 
 if ($Update) {
     Write-Host "Updating Workshop item..." -ForegroundColor Cyan
-    & $WorkshopTool update -path $ModPath -buildcat -changenote $ChangeNote
+    & $WorkshopTool update -path $ModPath -buildcat -batchmode -changenote $ChangeNote
 } else {
     Write-Host "First-publishing Workshop item..." -ForegroundColor Cyan
-    & $WorkshopTool publishx4 -path $ModPath -preview $previewPath -buildcat
+    & $WorkshopTool publishx4 -path $ModPath -preview $previewPath -buildcat -batchmode
 }
 
 if ($LASTEXITCODE -ne 0) {
