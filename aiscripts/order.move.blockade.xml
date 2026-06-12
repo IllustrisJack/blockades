@@ -5,7 +5,7 @@
       <param name="target" type="object" text="{20810, 110}" comment="Gate to blockade.">
         <input_param name="class" value="class.gate"/>
       </param>
-      <param name="distance" type="length" default="6km" text="{20810, 111}" comment="Distance from gate (sphere radius).">
+      <param name="distance" type="length" default="10km" text="{20810, 111}" comment="Distance from gate (sphere radius). Default 10km — keeps the inner-ring slots (~5km perpendicular from highway axis) clear of the busy gate-traffic envelope so ships actually become static at slot instead of fighting collision avoidance forever. Drop to 3-6km for tight rings if you want closer-quarters blockades.">
         <input_param name="min" value="3km"/>
         <input_param name="max" value="20km"/>
         <input_param name="step" value="1km"/>
@@ -37,9 +37,14 @@
     </requires>
     <!-- Two-tier location: prefer the slot position (per-ship marker, drawn like
          move.generic does); fall back to the gate itself if init hasn't computed
-         the slot yet (e.g. order is queued but hasn't run). -->
-    <location object="$targetsector" position="$slotpos" condition="$targetsector and $slotpos"/>
-    <location object="$target" condition="$target"/>
+         the slot yet (e.g. order is queued but hasn't run, or init aborted
+         before reaching the slot-resolve block). Conditions use the `@` safe-
+         read prefix because $targetsector and $slotpos are *local* vars set
+         conditionally inside init's `not $abort?` chain — without `@`, a bare
+         $targetsector lookup throws "Property lookup failed" every time the
+         map/UI engine evaluates the location for an aborted order. -->
+    <location object="$targetsector" position="$slotpos" condition="@$targetsector and @$slotpos"/>
+    <location object="$target" condition="@$target"/>
   </order>
   <interrupts>
     <handler ref="InterruptAttack"/>
@@ -101,18 +106,32 @@
       <remove_value name="$LocAutoGates"/>
     </do_if>
 
-    <!-- Validate target -->
+    <!-- Validate target. No hostile gate in this ship's sector is the
+         common case here (e.g. interior sectors, or war ended) — that's
+         "no work to do right now", not a script error. Logged at
+         filter="general" instead of "error" so the error filter stays
+         signal-only. The actual respawn-loop throttle lives in the
+         actions block (wait before resume finish). -->
     <do_if value="not $target or not $target.exists or not $target.isclass.gate">
-      <debug_text text="'Blockade: invalid target. Aborting.'" filter="error"/>
+      <debug_text text="'Blockade: %s — no valid target gate in %s, will idle.'.[this.ship.knownname, @this.ship.sector.knownname]" filter="general"/>
       <set_value name="$abort"/>
     </do_if>
 
-    <!-- "Already blockaded" check. Use @chain.field safe-read — vanilla pattern.
-         @$X.order.id propagates null through the whole chain, so null == 'Blockade'
-         is just false (no parser/runtime error). Earlier attempts using $X.order?
-         failed because ? checks schema-definedness, not value-non-null, and the
-         engine evaluates every conjunct in an AND chain regardless. -->
-    <do_if value="not $abort?">
+    <!-- "Already blockaded" check — AI deployment policy, not an order
+         invariant. Two AI-job leaders shouldn't stack at the same gate
+         (wastes ships, no marginal coverage gain), so AI-owned ships
+         abort if another faction is already there. A *player* who
+         picked this gate via the UI did so deliberately and may want
+         to contest / reinforce / stack — skip the check entirely for
+         player-owned ships.
+
+         Use @chain.field safe-read — vanilla pattern. @$X.order.id
+         propagates null through the whole chain, so null == 'Blockade'
+         is just false (no parser/runtime error). Earlier attempts
+         using $X.order? failed because ? checks schema-definedness,
+         not value-non-null, and the engine evaluates every conjunct in
+         an AND chain regardless. -->
+    <do_if value="not $abort? and not this.assignedcontrolled.isplayerowned">
       <find_ship name="$LocSectorShips" space="$target.sector" multiple="true"/>
       <do_for_each name="$LocOtherShip" in="$LocSectorShips">
         <do_if value="not $abort?
@@ -133,7 +152,7 @@
     <do_if value="not $abort?">
       <set_value name="$targetsector" exact="$target.sector"/>
       <do_if value="not $targetsector">
-        <debug_text text="'Blockade: target gate has no sector. Aborting.'" filter="error"/>
+        <debug_text text="'Blockade: target gate has no sector. Aborting.'" filter="general"/>
         <set_value name="$abort"/>
       </do_if>
     </do_if>
@@ -168,6 +187,18 @@
         <set_value name="$resolvedslot" exact="0"/>
       </do_if>
 
+      <!-- Sub-dispatch state. Persists across the hold loop so late-
+           joining subs (player attaches a wing mid-blockade) can be
+           picked up by the rescan block in the hold loop. $nextslotidx
+           is the next free slot index; init's sorted dispatch fills
+           1..N at order-start time, the hold-loop block keeps
+           incrementing for each new arrival. Initialize unconditionally
+           (even with zero subs at start) so the hold loop's rescan
+           doesn't have to special-case the empty-on-init scenario. -->
+      <set_value name="$dispatchedSubs" exact="[]"/>
+      <set_value name="$nextslotidx" exact="1"/>
+      <set_value name="$LastAttackDispatch" exact="table[]"/>
+
       <!-- If we're a wing leader, sort subs L/XL → M → S/everything-else so the
            bigger ships fill the inner hemisphere rings (closer to the gate) and
            smaller fast-engaging ships sit on the outer rings. Then dispatch each
@@ -189,26 +220,32 @@
             <append_to_list name="$orderedsubs" exact="$LocSub"/>
           </do_if>
         </do_for_each>
+        <!-- Third bucket: S and anything else — but NOT ship_xs.
+             Launched defence/repair drones show up in .subordinates
+             (a Verteidigungsdrohne got slot 8 in testing); they're
+             managed by the carrier's drone logic and must not be
+             given MoveWait slots or Attack orders. -->
         <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-          <do_if value="not ($LocSub.isclass.ship_l or $LocSub.isclass.ship_xl or $LocSub.isclass.ship_m)">
+          <do_if value="not ($LocSub.isclass.ship_l or $LocSub.isclass.ship_xl or $LocSub.isclass.ship_m or $LocSub.isclass.ship_xs or $LocSub.isunit)">
             <append_to_list name="$orderedsubs" exact="$LocSub"/>
           </do_if>
         </do_for_each>
 
-        <set_value name="$dispidx" exact="1"/>
         <do_for_each name="$LocSub" in="$orderedsubs">
-          <!-- Slot geometry per dispidx (same hemisphere model as before). -->
-          <do_if value="$dispidx le 6">
+          <!-- Slot geometry per $nextslotidx (same hemisphere model as the
+               late-dispatch rescan block in the hold loop — keep them in
+               sync if changed). -->
+          <do_if value="$nextslotidx le 6">
             <set_value name="$LocTheta" exact="30deg"/>
-            <set_value name="$LocPhi" exact="($dispidx - 1) * 2.0f * pi / 6.0f"/>
+            <set_value name="$LocPhi" exact="($nextslotidx - 1) * 2.0f * pi / 6.0f"/>
           </do_if>
-          <do_elseif value="$dispidx le 12">
+          <do_elseif value="$nextslotidx le 12">
             <set_value name="$LocTheta" exact="60deg"/>
-            <set_value name="$LocPhi" exact="($dispidx - 7) * 2.0f * pi / 6.0f"/>
+            <set_value name="$LocPhi" exact="($nextslotidx - 7) * 2.0f * pi / 6.0f"/>
           </do_elseif>
           <do_else>
             <set_value name="$LocTheta" exact="80deg"/>
-            <set_value name="$LocPhi" exact="($dispidx - 13) * 2.0f * pi / 8.0f"/>
+            <set_value name="$LocPhi" exact="($nextslotidx - 13) * 2.0f * pi / 8.0f"/>
           </do_else>
 
           <set_value name="$LocEffd" exact="$distance + $LocSub.size"/>
@@ -249,25 +286,31 @@
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
 
-          <!-- MoveWait positioned ships correctly in testing; ProtectPosition's
-               internal activepatrol scatters them. Subs run MoveWait at their
-               slot (vanilla position-and-hold). Proactive engagement comes from
-               the leader's hold loop below, which scans and dispatches
-               AttackInRange to subs when hostiles enter the gate area; subs
-               engage, then fall back to MoveWait default and return to slot. -->
-          <!-- default="true" MoveWait does NOT accept the timeout param —
-               engine throws "Timeout parameter 'timeout' was not expected for
-               default order" and the whole order spams errors. Only the active
-               variant below takes timeout. -->
+          <!-- Subs uniformly run MoveWait at slot as the default order
+               — that's the holding position. Actual combat engagement
+               is dispatched from the leader's hold loop (vanilla
+               order.fight.tactical pattern): when the leader detects
+               a hostile, it issues a per-sub Attack order with
+               radiusanchorpos = sub's slot + enforceradius=true so
+               movement is contained in a small bubble around the slot.
+               When the Attack ends (target dies / leaves radius), the
+               sub falls back to this MoveWait default and returns to
+               its slot.
+
+               default="true" MoveWait does NOT accept the timeout
+               param — engine throws "Timeout parameter 'timeout' was
+               not expected for default order" and the whole order
+               spams errors. Only the active variant below takes
+               timeout. -->
           <create_order id="'MoveWait'" object="$LocSub" default="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
             <param name="lookat" value="$LocLookatPos"/>
             <param name="recallsubordinates" value="false"/>
             <param name="debugchance" value="$debugchance"/>
           </create_order>
-          <!-- Omit default attribute entirely on active orders. X4 treats
-               default="false" as still flagging this as a default-style
-               order and silently ignores immediate="true". -->
+          <!-- Omit default attribute entirely on active orders. X4
+               treats default="false" as still flagging this as a
+               default-style order and silently ignores immediate. -->
           <create_order id="'MoveWait'" object="$LocSub" immediate="true">
             <param name="destination" value="[$targetsector, $LocSubSlot]"/>
             <param name="lookat" value="$LocLookatPos"/>
@@ -276,7 +319,23 @@
             <param name="debugchance" value="$debugchance"/>
           </create_order>
 
-          <set_value name="$dispidx" operation="add" exact="1"/>
+          <!-- Switch combat turrets to attackenemies for whatever turrets
+               the sub does have — helpful for M ships with full turret
+               coverage and for S ships with the few defensive turrets
+               they carry. Preserves missiledefence/mining assignments.
+               Not restored on finish (would require per-sub backup
+               table — player can reconfigure manually after the
+               blockade ends). -->
+          <find_object_component name="$LocSubWeapons" object="$LocSub" weapontype="combat" multiple="true"/>
+          <do_for_each name="$LocSubW" in="$LocSubWeapons">
+            <do_if value="$LocSubW.mode != weaponmode.missiledefence and $LocSubW.mode != weaponmode.mining">
+              <set_weapon_mode weapon="$LocSubW" weaponmode="weaponmode.attackenemies"/>
+            </do_if>
+          </do_for_each>
+          <remove_value name="$LocSubWeapons"/>
+
+          <append_to_list name="$dispatchedSubs" exact="$LocSub"/>
+          <set_value name="$nextslotidx" operation="add" exact="1"/>
           <remove_value name="$LocSubSlot"/>
           <remove_value name="$LocLookatPos"/>
         </do_for_each>
@@ -331,10 +390,12 @@
       <set_value name="$sloty" exact="$effdistance * sin($theta) * sin($phi)"/>
       <set_value name="$slotz" exact="$zsign * $effdistance * cos($theta)"/>
 
-      <!-- Highway-clearance offset for leader (slot 0 only). Push 2km + size
-           in +y so the leader sits above the highway centerline. -->
+      <!-- Highway-clearance offset for leader (slot 0 only). Push 3km + size
+           in +y so the leader sits well above the highway centerline; 2km
+           was inside the busy traffic envelope of active gates and the
+           leader fought collision avoidance forever. -->
       <do_if value="$resolvedslot == 0">
-        <set_value name="$sloty" exact="2km + this.ship.size"/>
+        <set_value name="$sloty" exact="3km + this.ship.size"/>
       </do_if>
 
       <create_position name="$slotpos" space="$targetsector"
@@ -381,8 +442,40 @@
   </init>
   <attention min="unknown">
     <actions>
+      <!-- Re-issue throttle. Blockade is the ship's default order
+           (jobs.xml), so completion immediately re-issues. If init's
+           auto-pick can't find a hostile gate, every retry would run
+           init → set_abort → resume finish → re-issue at script speed
+           (~10/sec on a single aicontext memory slot, observed in
+           debuglog). Wait here so the next retry is at least a minute
+           away — sane reaction window for new wars breaking out, no
+           CPU/log spam. Vanilla MoveWait doesn't need this because its
+           abort cases are typically triggered by transient interrupts
+           or one-shot reorder paths, not by a default order that
+           re-fires unconditionally. -->
       <do_if value="$abort?">
+        <wait min="60s" max="90s"/>
         <resume label="finish"/>
+      </do_if>
+
+      <!-- Defensive init for $dispatchedSubs / $nextslotidx. Normally
+           these are set up in the <init> block, but in-flight Blockade
+           orders that existed *before* the late-dispatch feature was
+           added (resumed via save/load with old persisted state) never
+           ran that init line. Without these vars, the hold-loop's
+           late-dispatch block re-appends every sub every iteration:
+           append_to_list silently fails on a null list, indexof keeps
+           returning falsy, and $nextslotidx logs as "null" on the
+           first dispatch then drifts. Initialize here so even old
+           order instances get a clean state before the hold loop. -->
+      <do_if value="not $dispatchedSubs?">
+        <set_value name="$dispatchedSubs" exact="[]"/>
+      </do_if>
+      <do_if value="not $nextslotidx?">
+        <set_value name="$nextslotidx" exact="1"/>
+      </do_if>
+      <do_if value="not $LastAttackDispatch?">
+        <set_value name="$LastAttackDispatch" exact="table[]"/>
       </do_if>
 
       <label name="start"/>
@@ -415,8 +508,18 @@
         <resume label="finish"/>
       </do_if>
 
+      <!-- Lookat for move.generic. Lookaway mirrors the sub-dispatch
+           pattern in init (doubled slot offset from gate, so the vector
+           ship→lookat points away from the gate). Earlier this set
+           lookat to object="this.ship" (self-reference) for lookaway —
+           degenerate, gave move.generic an undefined approach
+           orientation. Rotation refinement in the loop still corrects
+           facing on iteration 1, so this is mostly cosmetic, but the
+           consistent pattern means initial-approach orientation is
+           right and avoids a visible "wrong-way turn" at arrival. -->
       <do_if value="$lookaway">
-        <create_position name="$LocLeaderLookat" space="$targetsector" object="this.ship"/>
+        <create_position name="$LocLeaderLookat" space="$targetsector"
+                         x="$slotx * 2.0f" y="$sloty * 2.0f" z="$slotz * 2.0f" object="$target"/>
       </do_if>
       <do_else>
         <create_position name="$LocLeaderLookat" space="$targetsector" object="$target"/>
@@ -436,10 +539,39 @@
       <set_command_action commandaction="commandaction.standingby"/>
       <remove_value name="$LocLeaderLookat"/>
 
+      <!-- move.generic failure handling — pattern lifted from vanilla
+           order.move.wait.xml. Without this, a failed transit (path
+           blocked, sector unreachable, etc.) silently proceeds: the
+           $slotdistarrived baseline below captures whatever stranded
+           position the ship gave up at, drift threshold becomes huge,
+           leader sits forever far from slot. Match vanilla: mark the
+           order failed and finish so the job system can decide what to
+           do next (re-issue, idle, withdraw). -->
+      <do_if value="not $movesuccess">
+        <debug_text text="'Blockade: %s — move.generic failed to reach slot, finishing.'.[this.ship.knownname]" filter="general"/>
+        <do_if value="@this.assignedcontrolled.order.isrunning">
+          <set_order_failed order="this.assignedcontrolled.order" text="{1045, 101}" comment="Unable to reach blockade slot."/>
+        </do_if>
+        <resume label="finish"/>
+      </do_if>
+
       <do_if value="not $synced?">
         <set_order_syncpoint_reached order="this.ship.order"/>
         <set_value name="$synced" exact="true"/>
       </do_if>
+
+      <!-- Capture the distance move.generic actually parked the ship at,
+           relative to $slotpos. move.generic picks a safepos near the
+           target — for L/XL hulls in congested gate sectors that safepos
+           can legitimately be further from $slotpos than $exittol. Drift
+           detection in the hold loop must measure displacement relative
+           to THIS baseline, not against $slotpos directly; otherwise the
+           very first iteration trips on the legitimate safepos offset
+           and we re-transit forever (lands at another safepos with the
+           same offset, trips again, loops). Recomputed on every resume
+           to start so a fresh re-arrival reseats the baseline. -->
+      <set_value name="$slotdistarrived" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
+      <debug_text text="'Blockade: leader %s parked %sm from slotpos (exittol=%sm, drift trigger at %sm).'.[this.ship.knownname, ($slotdistarrived)i, ($exittol)i, ($slotdistarrived + $exittol)i]" filter="general"/>
 
       <!-- Hold loop: scan + dispatch + rotation refinement only. No
            movement re-fires. Drift check at the bottom; if knocked
@@ -452,93 +584,352 @@
           <resume label="finish"/>
         </do_if>
         <!-- Hostility reality-check. The order was launched against a
-             hostile destination, but state can shift mid-blockade: the
-             destination sector flipped to our own faction (war won),
-             the destination owner flipped to a friendly faction (war
-             ended), or the destination simply became friendly via
-             Dynamic War / diplomacy. In any of those, the blockade no
-             longer makes sense — finish cleanly so the job system can
-             re-task the ship to a current hostile-facing gate. -->
+             hostile destination, but state can shift mid-blockade.
+
+             Two classes of bail-out conditions, with different scope:
+
+             - Universal (apply to player and AI alike): destination
+               destroyed, destination has no sector-owner, destination
+               owner == us (we conquered it). In any of those the
+               blockade is geometrically pointless regardless of who
+               placed it.
+
+             - AI-only: `mayattack=false`. This is the engine's
+               war/peace predicate — the AI auto-pick uses it to
+               *deploy* a blockade, so once that war ends we want the
+               AI's blockade to also end so the job can re-task the
+               ship. But a *player* who manually picked a non-hostile
+               gate did so deliberately (harassment, RP, future-war
+               positioning) — auto-aborting their order based on
+               diplomatic state would be patronising. Guard the
+               mayattack sub-condition with `isplayerowned == false`.
+
+             Earlier revisions also bailed on `relationto gt -0.1`, but
+             the relation number bobs within a single war state
+             (incidents, news, DW modifiers) while mayattack stays
+             true — so the relation check was tripping on iteration 1
+             on every arrival. Removed; trust mayattack. -->
         <do_if value="not @$target.destination.exists
                       or not @$target.destination.sector.owner
                       or ($target.destination.sector.owner == this.assignedcontrolled.owner)
-                      or (not this.assignedcontrolled.owner.mayattack.{$target.destination.sector.owner})
-                      or (this.assignedcontrolled.owner.relationto.{$target.destination.sector.owner} gt -0.1)">
+                      or ((not this.assignedcontrolled.isplayerowned) and (not this.assignedcontrolled.owner.mayattack.{$target.destination.sector.owner}))">
           <debug_text text="'Blockade: %s — target no longer hostile, finishing (dest=%s, dest.owner=%s).'.[$target.knownname, @$target.destination, @$target.destination.sector.owner]" filter="general"/>
           <resume label="finish"/>
         </do_if>
 
-        <!-- Two-tier scan + dispatch (gate vicinity → leader vicinity).
-             Rally destination = leader's current position so subs converge
-             on the actual fight. -->
-        <do_if value="this.assignedcontrolled.subordinates.count gt 0">
-          <set_value name="$LocBlockadeHostile" exact="null"/>
-          <find_object name="$LocBlockadeHostile"
-                       object="$target"
-                       space="$targetsector"
-                       max="$engagerange"
-                       relation="enemy"
-                       class="class.ship"
-                       multiple="false"/>
-          <do_if value="not $LocBlockadeHostile">
-            <find_object name="$LocBlockadeHostile"
-                         object="this.assignedcontrolled"
-                         space="$targetsector"
-                         max="$engagerange"
-                         relation="enemy"
-                         class="class.ship"
-                         multiple="false"/>
+        <!-- ============ Fleet engagement (leader-coordinated) ============
+
+             Desired behaviour (state machine per sub, coordination is
+             stateless and lives entirely in the leader's scan):
+
+               HOLD    sub sits on MoveWait at its slot. Nothing in the
+                       script touches it — zero movement commands while
+                       the area is quiet.
+               ENGAGE  enemy inside the blockade's engagement area →
+                       sub gets a full vanilla Attack order (this is
+                       what makes L/XL bring their main batteries to
+                       bear — turret modes alone never fire forward
+                       guns). The Attack is bounded: radius =
+                       $engagerange anchored at the GATE, enforceradius
+                       — fight anywhere inside the blockade area,
+                       disengage anything that leaves it.
+               RETURN  Attack ended (area clear for this sub) → falls
+                       back to MoveWait default → flies to slot → HOLD.
+
+             Transitions:
+               - scan finds enemies → dispatch Attack to every sub
+                 currently on MoveWait. That covers both HOLD subs and
+                 RETURN subs — i.e. "new enemies join while ships are
+                 still flying back" re-engages them immediately.
+               - scan comes up empty → actively recall: cancel any sub
+                 Attack that WE issued (marked internalorder=true; a
+                 player-issued Attack is internalorder=false and is
+                 never touched). Recall is skipped when $pursuetargets
+                 is set — the player explicitly opted into pursuit
+                 beyond the ring.
+
+             Why one big engagement bubble instead of per-sub bubbles:
+             per-sub 2-4 km bubbles caused the "movement burst" loop —
+             Attack starts, target wanders out of the tiny bubble,
+             Attack ends, sub returns, re-dispatch 15s later. With the
+             bubble = the whole engagement area, an Attack lives until
+             the area is genuinely clear: one transition out, fight
+             everything (allowothertargets picks new targets from
+             gravidar inside the radius), one transition back.
+
+             Per-sub dispatch cooldown (30s): if a sub's Attack ends
+             early while enemies remain (unreachable/invalid target),
+             we re-dispatch at most once per 30s per sub, so a
+             degenerate target can't produce a dispatch-return loop.
+
+             The leader itself stays at its slot as the formation
+             anchor; its turrets were flipped to attackenemies in init.
+             Giving the leader a self-Attack order would PREEMPT this
+             very Blockade order → on_abort would fire → all sub
+             MoveWait defaults get cancelled → ring dismantles itself.
+             So the leader fights with turrets only; its subs do the
+             main-gun work.
+
+             Drones (ship_xs) are excluded everywhere — they are
+             managed by their carrier's drone logic, not by us. -->
+        <!-- Enemy detection — vanilla combat-scan idiom, lifted from
+             order.fight.attack.inrange.xml:112-121 (same primitive in
+             move.seekenemies.xml:242). find_gravidar_contact with
+             maybeattackedby is THE engine-side relation filter: it
+             returns only contacts this ship may attack — own fleet,
+             allies and neutrals can never come back. (The previous
+             find_object + relation="enemy" scan returned the blockade
+             ring ITSELF: targets named like our own subs, parked at
+             ring distances, count growing as our own drones launched.
+             Every Attack fizzled on the friendly target and real
+             enemies were ignored.) Gravidar also means the leader
+             only reacts to what it actually detects on radar — no
+             omniscient sector scan.
+             Post-filters per vanilla: same sector + cansee; plus
+             not-isunit (drones are noise — their parent ship is also
+             a contact and is the real threat; note drones are NOT
+             ship_xs, they're identified by .isunit). -->
+        <set_value name="$LocTargets" exact="[]"/>
+        <find_gravidar_contact groupname="$LocContacts"
+                               object="this.assignedcontrolled"
+                               docked="false"
+                               class="class.ship"
+                               maybeattackedby="this.assignedcontrolled"
+                               multiple="true">
+          <match_distance object="$target" max="$engagerange"/>
+        </find_gravidar_contact>
+        <do_for_each name="$LocH" in="$LocContacts">
+          <do_if value="$LocH.canbeattacked
+                        and (not $LocH.isunit)
+                        and ($LocH.sector == $targetsector)
+                        and this.assignedcontrolled.cansee.{$LocH}">
+            <append_to_list name="$LocTargets" exact="$LocH"/>
           </do_if>
-          <do_if value="$LocBlockadeHostile">
-            <create_position name="$LocRallyPos" space="$targetsector" object="this.assignedcontrolled"/>
-            <debug_text text="'Blockade: hostile %s detected, dispatching subs to leader pos.'.[$LocBlockadeHostile.knownname]" chance="$debugchance"/>
-            <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-              <do_if value="@$LocSub.order.id == 'MoveWait'">
-                <create_order id="'AttackInRange'" object="$LocSub" immediate="true">
-                  <param name="destination" value="[$targetsector, $LocRallyPos]"/>
-                  <param name="radius" value="$engagerange"/>
-                  <param name="pursuetargets" value="$pursuetargets"/>
-                  <param name="enforceradius" value="true"/>
-                  <param name="debugchance" value="$debugchance"/>
-                </create_order>
+        </do_for_each>
+        <remove_value name="$LocContacts"/>
+
+        <do_if value="($LocTargets.count gt 0) and $attackonsight and (this.assignedcontrolled.subordinates.count gt 0)">
+          <!-- Closest-to-gate enemy is the shared primary — the ship
+               most immediately violating the blockade. -->
+          <set_value name="$LocPrimary" exact="$LocTargets.{1}"/>
+          <do_for_each name="$LocH" in="$LocTargets">
+            <do_if value="$LocH.distanceto.{$target} lt $LocPrimary.distanceto.{$target}">
+              <set_value name="$LocPrimary" exact="$LocH"/>
+            </do_if>
+          </do_for_each>
+          <set_value name="$LocSecondaries" exact="$LocTargets.clone"/>
+          <remove_from_list name="$LocSecondaries" exact="$LocPrimary"/>
+          <create_position name="$LocGatePos" space="$targetsector" object="$target"/>
+
+          <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
+            <do_if value="(not $LocSub.isclass.ship_xs)
+                          and (not $LocSub.isunit)
+                          and (@$LocSub.order.id == 'MoveWait')
+                          and ((not @$LastAttackDispatch.{$LocSub}) or (player.age gt ($LastAttackDispatch.{$LocSub} + 30s)))">
+              <debug_text text="'Blockade: %s — engaging: %s target(s) in area, sub %s gets Attack on %s [%s] (dist to gate %sm).'.[this.ship.knownname, $LocTargets.count, $LocSub.knownname, $LocPrimary.knownname, @$LocPrimary.owner.knownname, ($LocPrimary.distanceto.{$target})i]" filter="general"/>
+              <create_order id="'Attack'" object="$LocSub" immediate="true">
+                <param name="primarytarget" value="$LocPrimary"/>
+                <param name="secondarytargets" value="$LocSecondaries"/>
+                <param name="allowothertargets" value="true"/>
+                <param name="pursuetargets" value="$pursuetargets"/>
+                <param name="checkrelation" value="false"/>
+                <param name="radius" value="$engagerange"/>
+                <param name="radiusanchorpos" value="$LocGatePos"/>
+                <param name="radiusanchorspace" value="$targetsector"/>
+                <param name="enforceradius" value="true"/>
+                <param name="internalorder" value="true"/>
+                <param name="debugchance" value="$debugchance"/>
+              </create_order>
+              <set_value name="$LastAttackDispatch.{$LocSub}" exact="player.age"/>
+            </do_if>
+          </do_for_each>
+
+          <remove_value name="$LocGatePos"/>
+          <remove_value name="$LocPrimary"/>
+          <remove_value name="$LocSecondaries"/>
+        </do_if>
+        <do_elseif value="($LocTargets.count == 0) and (not $pursuetargets) and (this.assignedcontrolled.subordinates.count gt 0)">
+          <!-- Area clear: recall any sub still on one of OUR Attack
+               orders (internalorder=true). Catches Attacks idling on
+               unreachable targets that never end on their own. The
+               cancel drops the sub to its MoveWait default → flies
+               back to slot. Player-issued Attacks (internalorder
+               unset/false) are never touched. -->
+          <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
+            <do_if value="(@$LocSub.order.id == 'Attack') and @$LocSub.order.$internalorder">
+              <debug_text text="'Blockade: %s — area clear, recalling sub %s to formation.'.[this.ship.knownname, $LocSub.knownname]" filter="general"/>
+              <cancel_order order="$LocSub.order"/>
+            </do_if>
+          </do_for_each>
+        </do_elseif>
+        <set_value name="$LocCombatTick" exact="$LocTargets.count gt 0"/>
+        <remove_value name="$LocTargets"/>
+
+        <!-- Late-joining sub dispatch. Init's <do_for_each> only sees
+             subs that exist at order-start time. Subs added mid-
+             blockade (player attaches a wing, a freshly-built ship
+             arrives, a sub re-attaches via the orphan-reaper MD) sit
+             on whatever default order their job gives them (typically
+             Escort) and never get a slot. Rescan subordinates each
+             iteration; for any sub not yet in $dispatchedSubs, assign
+             the next free slot via the same hemisphere model init
+             uses. Slot geometry duplicated from init — kept in sync
+             by review; X4 aiscripts have no function/macro mechanism
+             so inlining is the cleanest option.
+
+             Sorting: init prioritises L/XL → M → S so big hulls land
+             on the inner ring. Late dispatch appends at $nextslotidx
+             in arrival order — late-joining XLs may end up on outer
+             rings, but the alternative (re-sorting and re-dispatching
+             every sub) means existing settled subs fly back and forth
+             every time a new one joins, which is far worse UX. -->
+        <do_for_each name="$LocLateSub" in="this.assignedcontrolled.subordinates">
+          <do_if value="$LocLateSub.exists and (not $LocLateSub.isclass.ship_xs) and (not $LocLateSub.isunit) and (not $dispatchedSubs.indexof.{$LocLateSub})">
+            <do_if value="$nextslotidx le 6">
+              <set_value name="$LocTheta" exact="30deg"/>
+              <set_value name="$LocPhi" exact="($nextslotidx - 1) * 2.0f * pi / 6.0f"/>
+            </do_if>
+            <do_elseif value="$nextslotidx le 12">
+              <set_value name="$LocTheta" exact="60deg"/>
+              <set_value name="$LocPhi" exact="($nextslotidx - 7) * 2.0f * pi / 6.0f"/>
+            </do_elseif>
+            <do_else>
+              <set_value name="$LocTheta" exact="80deg"/>
+              <set_value name="$LocPhi" exact="($nextslotidx - 13) * 2.0f * pi / 8.0f"/>
+            </do_else>
+
+            <set_value name="$LocEffd" exact="$distance + $LocLateSub.size"/>
+            <set_value name="$LocSx" exact="$LocEffd * sin($LocTheta) * cos($LocPhi)"/>
+            <set_value name="$LocSy" exact="$LocEffd * sin($LocTheta) * sin($LocPhi)"/>
+            <set_value name="$LocSz" exact="$zsign * $LocEffd * cos($LocTheta)"/>
+
+            <create_position name="$LocSubSlot" space="$targetsector"
+                             x="$LocSx" y="$LocSy" z="$LocSz" object="$target"/>
+
+            <do_if value="$lookaway">
+              <create_position name="$LocLookatPos" space="$targetsector"
+                               x="$LocSx * 2.0f" y="$LocSy * 2.0f" z="$LocSz * 2.0f" object="$target"/>
+            </do_if>
+            <do_else>
+              <create_position name="$LocLookatPos" space="$targetsector" object="$target"/>
+            </do_else>
+
+            <!-- Cancel the sub's current Escort/etc. so our MoveWait takes
+                 over. Cover the same id set as init plus Escort (the
+                 typical job-default for newly-attached subs). -->
+            <do_if value="@$LocLateSub.order.id == 'MoveWait'
+                          or @$LocLateSub.order.id == 'ProtectPosition'
+                          or @$LocLateSub.order.id == 'Attack'
+                          or @$LocLateSub.order.id == 'AttackInRange'
+                          or @$LocLateSub.order.id == 'Blockade'
+                          or @$LocLateSub.order.id == 'Escort'">
+              <cancel_order order="$LocLateSub.order"/>
+            </do_if>
+            <do_if value="@$LocLateSub.defaultorder.id == 'MoveWait'
+                          or @$LocLateSub.defaultorder.id == 'ProtectPosition'
+                          or @$LocLateSub.defaultorder.id == 'AttackInRange'
+                          or @$LocLateSub.defaultorder.id == 'Blockade'
+                          or @$LocLateSub.defaultorder.id == 'Escort'">
+              <cancel_order order="$LocLateSub.defaultorder"/>
+            </do_if>
+
+            <!-- Uniform MoveWait — same architecture as init. Combat
+                 engagement is leader-dispatched from the hold loop
+                 (vanilla Tactical pattern). -->
+            <create_order id="'MoveWait'" object="$LocLateSub" default="true">
+              <param name="destination" value="[$targetsector, $LocSubSlot]"/>
+              <param name="lookat" value="$LocLookatPos"/>
+              <param name="recallsubordinates" value="false"/>
+              <param name="debugchance" value="$debugchance"/>
+            </create_order>
+            <create_order id="'MoveWait'" object="$LocLateSub" immediate="true">
+              <param name="destination" value="[$targetsector, $LocSubSlot]"/>
+              <param name="lookat" value="$LocLookatPos"/>
+              <param name="timeout" value="0s"/>
+              <param name="recallsubordinates" value="false"/>
+              <param name="debugchance" value="$debugchance"/>
+            </create_order>
+
+            <!-- Same turret-mode switch the init dispatch applies — the
+                 engine's combat AI handles "scan and engage in range"
+                 autonomously when turrets are in attackenemies mode,
+                 with zero hull movement. No script-side scan needed,
+                 and crucially no patrol behaviour (which is what
+                 every vanilla defend/protect order would force on us).
+                 Missiledefence/mining roles preserved per turret. -->
+            <find_object_component name="$LocLateSubWeapons" object="$LocLateSub" weapontype="combat" multiple="true"/>
+            <do_for_each name="$LocLateSubW" in="$LocLateSubWeapons">
+              <do_if value="$LocLateSubW.mode != weaponmode.missiledefence and $LocLateSubW.mode != weaponmode.mining">
+                <set_weapon_mode weapon="$LocLateSubW" weaponmode="weaponmode.attackenemies"/>
               </do_if>
             </do_for_each>
-            <remove_value name="$LocRallyPos"/>
-          </do_if>
-        </do_if>
+            <remove_value name="$LocLateSubWeapons"/>
 
-        <!-- Rotation-only refinement at slot. forceposition=true + current
-             ship position pins translation; forcerotation=true converges
-             facing on $LocFaceRot. Short interrupt so the next scan
-             iteration fires promptly. -->
+            <debug_text text="'Blockade: %s — late-dispatched sub %s to slot %s.'.[this.ship.knownname, $LocLateSub.knownname, $nextslotidx]" filter="general"/>
+            <append_to_list name="$dispatchedSubs" exact="$LocLateSub"/>
+            <set_value name="$nextslotidx" operation="add" exact="1"/>
+            <remove_value name="$LocSubSlot"/>
+            <remove_value name="$LocLookatPos"/>
+          </do_if>
+        </do_for_each>
+
+        <!-- Rotation-only refinement at slot. Vanilla idiom lifted
+             verbatim from order.move.recon.xml:1239-1251 (the recon
+             scanner uses it on every scan tick to keep the ship facing
+             its target). Two move_tos: a chance="0" interrupt=0s stub
+             to wake the steering system, then the actual snap with
+             forcerotation=true, explicit absolute coords + 10m z-offset,
+             forcesteering conditional on non-capital. The trailing
+             set_to_default_flight_control_model is vanilla's own
+             workaround comment ("forcesteering should revert implicitly
+             but not yet safe to do so") so we mirror it. Note: NO
+             forceposition — earlier forceposition="true" + <position
+             object="this.ship"/> self-reference was the cycler, the
+             engine didn't treat it as a no-op the way the comment
+             claimed. -->
         <do_if value="$lookaway">
-          <create_orientation name="$LocFaceRot" orientation="look_away" refobject="$target">
+          <create_orientation name="$LocFaceRot" refobject="$target" orientation="look_away">
             <position object="this.ship"/>
           </create_orientation>
         </do_if>
         <do_else>
-          <create_orientation name="$LocFaceRot" orientation="look_at" refobject="$target">
+          <create_orientation name="$LocFaceRot" refobject="$target" orientation="look_at">
             <position object="this.ship"/>
           </create_orientation>
         </do_else>
-        <move_to object="this.ship" destination="$targetsector"
-                 forcerotation="true" forceposition="true" commandaction="false">
-          <position object="this.ship"/>
-          <rotation value="$LocFaceRot"/>
-          <interrupt_after_time time="3s"/>
+        <move_to destination="this.zone" object="this.ship" chance="0">
+          <interrupt_after_time time="0s"/>
         </move_to>
+        <move_to destination="this.zone" object="this.ship" forcerotation="true" forcesteering="not this.ship.iscapitalship">
+          <position x="this.ship.position.x" y="this.ship.position.y" z="this.ship.position.z + 10m"/>
+          <rotation value="$LocFaceRot"/>
+        </move_to>
+        <set_to_default_flight_control_model object="this.ship"/>
         <remove_value name="$LocFaceRot"/>
 
         <!-- Drift detection — only re-transit if ship was knocked WAY off
-             slot (weapon impulse, mass-traffic shove). $exittol is the
-             generous threshold from init. Smaller drift accepted. -->
+             its arrival position. Baseline is $slotdistarrived (where
+             move.generic actually parked us, NOT $slotpos), because
+             safepos selection can legitimately leave a hull > $exittol
+             off the geometric slot — measuring against $slotpos in that
+             case mistakes the legitimate offset for drift and re-fires
+             move.generic forever. $exittol stays as the additional drift
+             we tolerate beyond the arrival baseline. -->
         <set_value name="$slotdist" exact="this.ship.distanceto.[$targetsector, $slotpos]"/>
-        <do_if value="$slotdist gt $exittol">
-          <debug_text text="'Blockade: drifted %sm off slot (>%sm), re-transit.'.[($slotdist)i, ($exittol)i]" chance="$debugchance"/>
+        <do_if value="$slotdist gt ($slotdistarrived + $exittol)">
+          <debug_text text="'Blockade: %s drifted to %sm (arrival=%sm, +exittol=%sm), re-transit.'.[this.ship.knownname, ($slotdist)i, ($slotdistarrived)i, ($exittol)i]" filter="general"/>
           <resume label="start"/>
         </do_if>
 
-        <wait min="10s" max="20s"/>
+        <!-- Adaptive cadence: tick faster while enemies are in the
+             area (responsive re-dispatch for subs returning early),
+             slower when quiet (the scan is the only per-tick work). -->
+        <do_if value="@$LocCombatTick">
+          <wait min="5s" max="10s"/>
+        </do_if>
+        <do_else>
+          <wait min="10s" max="20s"/>
+        </do_else>
       </do_while>
 
       <label name="finish"/>
@@ -549,10 +940,16 @@
            cancel_order on $ship.defaultorder. -->
       <do_if value="this.assignedcontrolled.subordinates.count gt 0">
         <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-          <do_if value="@$LocSub.order.id == 'MoveWait' or @$LocSub.order.id == 'AttackInRange'">
+          <!-- Cover MoveWait (sub default), our dispatched Attacks
+               (internalorder=true — player-issued Attacks are left
+               alone), AttackInRange (legacy from older script
+               versions, may still exist on resumed saves). -->
+          <do_if value="@$LocSub.order.id == 'MoveWait'
+                        or (@$LocSub.order.id == 'Attack' and @$LocSub.order.$internalorder)
+                        or @$LocSub.order.id == 'AttackInRange'">
             <cancel_order order="$LocSub.order"/>
           </do_if>
-          <do_if value="@$LocSub.defaultorder.id == 'MoveWait'">
+          <do_if value="@$LocSub.defaultorder.id == 'MoveWait' or @$LocSub.defaultorder.id == 'AttackInRange'">
             <cancel_order order="$LocSub.defaultorder"/>
           </do_if>
         </do_for_each>
@@ -574,10 +971,12 @@
   <on_abort>
     <do_if value="this.assignedcontrolled.subordinates.count gt 0">
       <do_for_each name="$LocSub" in="this.assignedcontrolled.subordinates">
-        <do_if value="@$LocSub.order.id == 'MoveWait' or @$LocSub.order.id == 'AttackInRange'">
+        <do_if value="@$LocSub.order.id == 'MoveWait'
+                      or (@$LocSub.order.id == 'Attack' and @$LocSub.order.$internalorder)
+                      or @$LocSub.order.id == 'AttackInRange'">
           <cancel_order order="$LocSub.order"/>
         </do_if>
-        <do_if value="@$LocSub.defaultorder.id == 'MoveWait'">
+        <do_if value="@$LocSub.defaultorder.id == 'MoveWait' or @$LocSub.defaultorder.id == 'AttackInRange'">
           <cancel_order order="$LocSub.defaultorder"/>
         </do_if>
       </do_for_each>
