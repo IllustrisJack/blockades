@@ -13,14 +13,16 @@ Adds a [b]Blockade[/b] default behavior for your fleet, plus an AI system that h
 
 The wing leader sits in front of the gate (offset slightly above the highway centerline so capital hulls don't fight mass-traffic). Subordinates fan out in a hemisphere on the hostile side, class-sorted: L/XL ships fill the inner ring closer to the leader, M and S spill out to the middle and outer rings. Capitals anchor, fast hulls intercept.
 
-When an enemy ship enters [b]Engagement Range[/b] of the gate (or the leader), all subordinates dispatch to engage. After the area clears they fall back to their slots. The leader is bastion-style: holds position, turrets fire at anything in range.
+While the area is quiet the ring sits perfectly still. When an enemy enters [b]Engagement Range[/b] of the gate, the leader dispatches the whole wing with full Attack orders — including L/XL subordinates with their main batteries. Combat is bounded to the engagement area: ships disengage anything that leaves it and fly back to their slots once the area is clear. New arrivals re-trigger the attack immediately, even while ships are still returning. Ships added to the wing mid-blockade are assigned a slot automatically — no need to reissue the order.
+
+The leader is bastion-style: holds position as the formation anchor, turrets fire at anything in range.
 
 [h2]Recommended fleet leader[/h2]
-Use an [b]L (destroyer)[/b] or [b]M (frigate / corvette)[/b] as the wing leader. [b]XL pathfinding currently has issues[/b] — XL hulls work fine as subordinates, just not as the leader. [b]Note for L/XL flagships:[/b] forward main batteries don't fire automatically (vanilla X4 limit — those weapons need an Attack-style order context). Turrets handle leader-side engagement.
+Use an [b]L (destroyer)[/b] or [b]M (frigate / corvette)[/b] as the wing leader. [b]XL pathfinding currently has issues[/b] — XL hulls work fine as subordinates, just not as the leader. [b]Note for L/XL flagships:[/b] the leader's own forward main batteries don't fire automatically (an Attack order would override the blockade itself) — turrets handle leader-side engagement. Subordinate L/XL ships [i]do[/i] use their main batteries.
 
 [h2]Order parameters[/h2]
 [list]
-[*][b]Distance from Gate[/b] (default 6 km) — radius of the formation sphere.
+[*][b]Distance from Gate[/b] (default 10 km) — radius of the formation sphere.
 [*][b]Engagement Range[/b] (default ship's radar range) — hostiles outside this are ignored.
 [*][b]Pursue Targets[/b] (advanced) — if on, ships chase beyond the formation. Off by default.
 [*][b]Face Away From Gate[/b] — reverse formation orientation; useful for sector-side blockades.
