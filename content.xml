@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<content id="ws_3742380668" name="Blockades" description="Adds a Blockade default behavior. Ships hold a hemisphere formation on the hostile side of a target gate and engage transiting hostiles. AI factions at war auto-blockade enemy-facing gates in their claimspace." author="IllustrisJack" version="112" date="2026-06-15" save="0" enabled="1" sync="false" lastupdate="1781292549">
+<content id="ws_3742380668" name="Blockades" description="Adds a Blockade default behavior. Ships hold a hemisphere formation on the hostile side of a target gate and engage transiting hostiles. AI factions at war auto-blockade enemy-facing gates in their claimspace." author="IllustrisJack" version="112" date="2026-06-15" save="0" enabled="1" sync="false" lastupdate="1781541673">
   <dependency id="ego_dlc_split" optional="true" name="Split Vendetta"/>
   <dependency id="ego_dlc_terran" optional="true" name="Cradle of Humanity"/>
   <dependency id="ego_dlc_pirate" optional="true" name="Tides of Avarice"/>
