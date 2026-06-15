@@ -732,7 +732,22 @@
                 <param name="secondarytargets" value="$LocSecondaries"/>
                 <param name="allowothertargets" value="true"/>
                 <param name="pursuetargets" value="$pursuetargets"/>
-                <param name="checkrelation" value="false"/>
+                <!-- checkrelation MUST be true. With allowothertargets,
+                     once the assigned primary/secondaries die the sub
+                     re-acquires from gravidar on its own; checkrelation
+                     gates that re-acquisition by mayattack. With it
+                     false (the old value, cargo-culted from
+                     order.fight.tactical's "force the attack"), the
+                     sub would pick ANY contact in range after a kill —
+                     allies and neutrals included (see
+                     order.fight.attack.object.xml:572, where
+                     not-checkrelation explicitly proceeds against a
+                     non-mayattack target). Our assigned targets are
+                     already mayattack-validated by the leader's
+                     gravidar scan (maybeattackedby), and subs share the
+                     leader's owner, so true never rejects the assigned
+                     primary — it only keeps re-acquisition honest. -->
+                <param name="checkrelation" value="true"/>
                 <param name="radius" value="$engagerange"/>
                 <param name="radiusanchorpos" value="$LocGatePos"/>
                 <param name="radiusanchorspace" value="$targetsector"/>
