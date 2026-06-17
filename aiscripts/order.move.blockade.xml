@@ -19,6 +19,7 @@
       <param name="attackonsight" default="true" type="bool" text="{20810, 114}" advanced="true" comment="Attack hostiles on sight (vs. only when attacked)."/>
       <param name="hostileside" default="0" type="internal" comment="Which side of the gate: 0=auto, 1=destination-facing, -1=interior-facing."/>
       <param name="lookaway" default="false" type="bool" text="{20810, 118}" comment="Face away from the gate (sector-side blockade) instead of toward it."/>
+      <param name="flipside" default="false" type="bool" text="{20810, 120}" comment="Flip to the opposite side of the gate. Manual override for accelerators/gates whose model faces the unexpected way (ships landing behind the gate instead of on the transit side)."/>
       <param name="formationsize" default="0" type="internal" comment="Total ships in formation. 0 = auto-detect from fleet."/>
       <param name="slotindex" default="-1" type="internal" comment="This ship's slot in the formation. -1 = auto-detect."/>
       <param name="slotpos" default="null" type="internal" comment="Computed slot position in $targetsector. Set in init; exposed via &lt;location&gt; so the map can render the per-ship destination."/>
@@ -157,9 +158,13 @@
       </do_if>
     </do_if>
 
-    <!-- Determine hostile-side sign. Vanilla deploys at z=-3km for accelerators and
-         z=+3km for jumpgates (see order.deployobjectsatgates.xml); we follow the
-         same convention so the formation lands on the "incoming traffic" side. -->
+    <!-- Determine hostile-side sign along the gate's local +Z. Both jump gates and
+         accelerators put their active (transit) side on +Z: vanilla move.gate
+         approaches accelerators from the front (+Z) and ships also exit there
+         (z=abs(startpos.z)), so the -Z back is dead space. Default +1 for everything.
+         (The old -1 accelerator case was copied from deployobjectsatgates' mine-drop
+         convention and parked the blockade behind the accelerator.) $flipside is the
+         manual override for any gate whose model happens to face the other way. -->
     <do_if value="not $abort?">
       <do_if value="$hostileside == 1">
         <set_value name="$zsign" exact="1.0f"/>
@@ -168,13 +173,11 @@
         <set_value name="$zsign" exact="-1.0f"/>
       </do_elseif>
       <do_else>
-        <do_if value="$target.isaccelerator">
-          <set_value name="$zsign" exact="-1.0f"/>
-        </do_if>
-        <do_else>
-          <set_value name="$zsign" exact="1.0f"/>
-        </do_else>
+        <set_value name="$zsign" exact="1.0f"/>
       </do_else>
+      <do_if value="$flipside">
+        <set_value name="$zsign" exact="-$zsign"/>
+      </do_if>
     </do_if>
 
     <!-- Resolve own slot. Leader/solo: 0. Explicit override from MD dispatch
